@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+        android:id="@+id/widgetLayoutShadow"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:elevation="0dp" />
+
+    <RelativeLayout
+        android:id="@+id/widgetLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_margin="8dp"
+        android:elevation="0dp"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:id="@+id/layoutHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvCurrentDate"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="#ff0000"
+                android:textSize="@dimen/widget_header"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/imgAdd"
+                android:layout_width="@dimen/widget_button_width"
+                android:layout_height="@dimen/widget_button_height"
+                android:layout_weight="0"
+                android:background="@android:color/transparent"
+                android:contentDescription="@string/add"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_add" />
+
+            <ImageButton
+                android:id="@+id/imgRefresh"
+                android:layout_width="@dimen/widget_button_width"
+                android:layout_height="@dimen/widget_button_height"
+                android:layout_weight="0"
+                android:background="@android:color/transparent"
+                android:contentDescription="@string/refresh"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_refresh" />
+
+            <ImageButton
+                android:id="@+id/imgSettings"
+                android:layout_width="@dimen/widget_button_width"
+                android:layout_height="@dimen/widget_button_height"
+                android:layout_weight="0"
+                android:background="@android:color/transparent"
+                android:contentDescription="@string/settings"
+                android:scaleType="fitCenter"
+                android:onClick="startSettings"
+                android:src="@drawable/ic_settings" />
+
+            <Button
+                android:id="@+id/btn_getevents"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:onClick="runGetEvents"
+                android:text="Get events"
+                android:textColor="#ff0000"
+                android:textSize="@dimen/widget_header"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/lvEvents"
+            android:layout_width="match_parent"
+            android:layout_height="fill_parent"
+            android:layout_below="@id/layoutHeader"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:scrollbarThumbVertical="@drawable/scrollbar" />
+    </RelativeLayout>
+
+</RelativeLayout>

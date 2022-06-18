@@ -27,7 +27,8 @@ public class SettingTransparentColor extends SettingInteger {
 
     @Override
     public void onClick(final AdapterView<?> parent, View view) {
-
+    // [MB] colorpicker disabled because the methods don't match
+    /*
         final ColorPicker cp;
         int colorValue = getValue();
         if (transparent) {
@@ -47,6 +48,7 @@ public class SettingTransparentColor extends SettingInteger {
         cp.show();
         cp.setButtonColor(view.getContext().getResources().getColor(R.color.colorPrimary));
         cp.setBackgroundDrawable(background);
+    */
     }
 
     public void setBackground(Drawable background) {

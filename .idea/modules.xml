@@ -2,9 +2,9 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/AgendaWidget.iml" filepath="$PROJECT_DIR$/AgendaWidget.iml" />
-      <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
-      <module fileurl="file://$PROJECT_DIR$/../android-material-color-picker-dialog/library/colorPicker.iml" filepath="$PROJECT_DIR$/../android-material-color-picker-dialog/library/colorPicker.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/AgendaWidget.iml" filepath="$PROJECT_DIR$/.idea/modules/AgendaWidget.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/app/AgendaWidget.app.iml" filepath="$PROJECT_DIR$/.idea/modules/app/AgendaWidget.app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/-1752584051/AgendaWidget.colorPicker.iml" filepath="$PROJECT_DIR$/.idea/modules/-1752584051/AgendaWidget.colorPicker.iml" />
     </modules>
   </component>
 </project>

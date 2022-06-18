@@ -23,6 +23,8 @@ public class SettingColor extends SettingInteger {
 
     @Override
     public void onClick(final AdapterView<?> parent, View view) {
+    // [MB] colorpicker disabled because the methods don't match
+    /*
         int colorValue = getValue();
         final ColorPicker cp = new ColorPicker((Activity) view.getContext(), Color.red(colorValue), Color.green(colorValue), Color.blue(colorValue));
 
@@ -36,6 +38,7 @@ public class SettingColor extends SettingInteger {
 
         cp.show();
         cp.setButtonColor(view.getContext().getResources().getColor(R.color.colorPrimary));
+    */
     }
 
     @Override

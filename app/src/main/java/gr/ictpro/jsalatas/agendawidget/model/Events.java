@@ -1,8 +1,11 @@
 package gr.ictpro.jsalatas.agendawidget.model;
 
+import android.util.Log;
+
 import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.CalendarEvent;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.Calendars;
+import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars;
 import gr.ictpro.jsalatas.agendawidget.model.settings.Settings;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskContract;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
@@ -14,7 +17,8 @@ public class Events {
     public static List<EventItem> getEvents(int appWidgetId) {
         List<EventItem> events = new ArrayList<>();
 
-        events.addAll(Calendars.getEvents(appWidgetId));
+//        events.addAll(Calendars.getEvents(appWidgetId));
+        events.addAll(ExtendedCalendars.getEvents(appWidgetId)); // [MB]
         events.addAll(Tasks.getEvents(appWidgetId));
 
         TaskContract tasks = TaskProvider.getTaskContract(Settings.getStringPref(AgendaWidgetApplication.getContext(), "taskProvider", appWidgetId));

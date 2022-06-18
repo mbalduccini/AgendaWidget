@@ -61,6 +61,10 @@ public class Calendars {
     }
 
     public static List<EventItem> getEvents(int appWidgetId) {
+        return(getEvents(appWidgetId,new BasicCalendarFetchAdapter())); // [MB]
+    }
+
+    public static List<EventItem> getEvents(int appWidgetId,CalendarFetchAdapter cfa) {
         List<EventItem> calendarEvents = new ArrayList<>();
         if (!checkPermissions()) {
             return calendarEvents;
@@ -72,16 +76,6 @@ public class Calendars {
         if (calendarsList.length == 1 && calendarsList[0].isEmpty()) {
             return calendarEvents;
         }
-
-        StringBuilder sb = new StringBuilder();
-        for (String calendar : calendarsList) {
-            if (!sb.toString().isEmpty()) {
-                sb.append(" OR ");
-            }
-            sb.append(CalendarContract.Events.CALENDAR_ID).append(" = ").append(calendar);
-        }
-
-        String selectedAccountsFilter = sb.toString();
 
         TimeZone tzLocal = TimeZone.getDefault();
 
@@ -95,6 +89,52 @@ public class Calendars {
 
         calendarInstance.setTimeInMillis(selectedRangeStart.getTime() + searchPeriod);
         Date selectedRangeEnd = DateUtils.dayCeil(calendarInstance.getTime());
+
+        calendarEvents=cfa.fetchCalendarEvents(appWidgetId,calendarsList,selectedRangeStart,selectedRangeEnd);
+
+        Collections.sort(calendarEvents);
+
+        if (Settings.getBoolPref(AgendaWidgetApplication.getContext(), "groupByDate", appWidgetId)) {
+            // add dayGroups
+            List<EventItem> tmpCalendarEvents = new ArrayList<>();
+            Date headerDate = DateUtils.dayFloor(DateUtils.previousDay(selectedRangeStart));
+
+            for (EventItem e : calendarEvents) {
+                Date current = DateUtils.dayFloor(e.getStartDate());
+                if (current.compareTo(headerDate) != 0) {
+                    headerDate = DateUtils.dayFloor(current);
+                    if (headerDate.compareTo(DateUtils.dayFloor(selectedRangeStart)) < 0) {
+                        headerDate = DateUtils.dayFloor(selectedRangeStart);
+                    }
+                    DayGroup dg = new DayGroup(headerDate);
+                    if (!tmpCalendarEvents.contains(dg)) {
+                        tmpCalendarEvents.add(dg);
+                    }
+                }
+                tmpCalendarEvents.add(e);
+            }
+
+            calendarEvents = tmpCalendarEvents;
+
+        }
+
+        return calendarEvents;
+    }
+}
+
+class BasicCalendarFetchAdapter implements CalendarFetchAdapter {
+    public List<EventItem> fetchCalendarEvents(int appWidgetId,String[] calendarsList,Date selectedRangeStart,Date selectedRangeEnd) {
+        List<EventItem> calendarEvents = new ArrayList<>();
+
+        StringBuilder sb = new StringBuilder();
+        for (String calendar : calendarsList) {
+            if (!sb.toString().isEmpty()) {
+                sb.append(" OR ");
+            }
+            sb.append(CalendarContract.Events.CALENDAR_ID).append(" = ").append(calendar);
+        }
+
+        String selectedAccountsFilter = sb.toString();
 
         ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
 
@@ -128,6 +168,7 @@ public class Calendars {
 
         Cursor cur = cr.query(builder.build(), PROJECTION, selection, null, null);
 
+        java.util.Calendar calendarInstance = GregorianCalendar.getInstance();
         Date now = GregorianCalendar.getInstance().getTime();
         while (cur.moveToNext()) {
             id = cur.getLong(0);
@@ -153,34 +194,7 @@ public class Calendars {
             }
         }
         cur.close();
-        Collections.sort(calendarEvents);
 
-        if (Settings.getBoolPref(AgendaWidgetApplication.getContext(), "groupByDate", appWidgetId)) {
-            // add dayGroups
-            List<EventItem> tmpCalendarEvents = new ArrayList<>();
-            Date headerDate = DateUtils.dayFloor(DateUtils.previousDay(selectedRangeStart));
-
-            for (EventItem e : calendarEvents) {
-                Date current = DateUtils.dayFloor(e.getStartDate());
-                if (current.compareTo(headerDate) != 0) {
-                    headerDate = DateUtils.dayFloor(current);
-                    if (headerDate.compareTo(DateUtils.dayFloor(selectedRangeStart)) < 0) {
-                        headerDate = DateUtils.dayFloor(selectedRangeStart);
-                    }
-                    DayGroup dg = new DayGroup(headerDate);
-                    if (!tmpCalendarEvents.contains(dg)) {
-                        tmpCalendarEvents.add(dg);
-                    }
-                }
-                tmpCalendarEvents.add(e);
-            }
-
-            calendarEvents = tmpCalendarEvents;
-
-        }
-
-        return calendarEvents;
+        return(calendarEvents);
     }
-
-
 }

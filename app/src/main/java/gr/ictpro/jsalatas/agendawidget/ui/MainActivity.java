@@ -40,6 +40,7 @@ import android.text.style.StyleSpan;
 import android.util.Log;
 import android.view.*;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -47,7 +48,13 @@ import android.widget.RemoteViews;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.dmfs.rfc5545.DateTime;
+import org.dmfs.rfc5545.recur.InvalidRecurrenceRuleException;
+import org.dmfs.rfc5545.recur.RecurrenceRule;
+import org.dmfs.rfc5545.recur.RecurrenceRuleIterator;
+
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
@@ -75,18 +82,22 @@ public class MainActivity extends AppCompatActivity {
     List<EventItem> events = new ArrayList<>();
     public static int appWidgetId=1;
 
-    String tutorials[]
-            = { "Algorithms", "Data Structures",
-            "Languages", "Interview Corner",
-            "GATE", "ISRO CS",
-            "UGC NET CS", "CS Subjects",
-            "Web Technologies" };
-
     public class MySimpleArrayAdapter extends ArrayAdapter<String> {
         private final Context context;
         private final String[] values;
 
-        public MySimpleArrayAdapter(Context context, String[] values) {
+        private void setOnClick(final Button btn, final int val){
+            btn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+
+                    // Do whatever you want(str can be used here)
+
+                }
+            });
+        }
+
+        public MySimpleArrayAdapter(Context context,String[] values) {
             super(context, R.layout.calendar_event_layout, values);
             this.context = context;
             this.values = values;
@@ -96,6 +107,9 @@ public class MainActivity extends AppCompatActivity {
         public View getView(int position, View convertView, ViewGroup parent) {
             LayoutInflater inflater = (LayoutInflater) context
                     .getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+
+            if (position>=events.size())
+                return(inflater.inflate(R.layout.calendar_event_layout, parent, false));
 
             EventItem item = events.get(position);
 
@@ -123,12 +137,15 @@ public class MainActivity extends AppCompatActivity {
 
                 Date now = GregorianCalendar.getInstance().getTime();
 
+                /*
                 boolean isToday = (isTask && calendarEvent.getEndDate().getTime() != 0
                         && ((Settings.getBoolPref(AgendaWidgetApplication.getContext(), "showOverdueTasks", appWidgetId) && calendarEvent.getEndDate().compareTo(now) <= 0)
                         || (calendarEvent.getEndDate().compareTo(now) <= 0 && DateUtils.isInSameDay(calendarEvent.getEndDate(), now)))) ||
                         (!isTask && (calendarEvent.containsDate(now) ||
                                 DateUtils.isInSameDay(calendarEvent.getStartDate(), now) ||
                                 DateUtils.isInSameDay(calendarEvent.getEndDate(), now)));
+                 */
+                boolean isToday=false;
 
                 @ColorInt int dateTitleColor = Color.parseColor(isToday ?
                         Settings.getStringPref(AgendaWidgetApplication.getContext(), "todayDateTitleColor", appWidgetId) :
@@ -140,13 +157,14 @@ public class MainActivity extends AppCompatActivity {
                 ((TextView)v.findViewById(R.id.tvTitle)).setTextColor(dateTitleColor);
 
                 StringBuilder sb = new StringBuilder();
-                boolean startIsToday = DateUtils.isInSameDay(calendarEvent.getStartDate(), now);
+                //boolean startIsToday = DateUtils.isInSameDay(calendarEvent.getStartDate(), now);
+                boolean startIsToday = false;
                 boolean addSpace = false;
 
                 if (!isTask) {
                     if (startIsToday && !calendarEvent.isAllDay()) {
                         sb.append(Settings.formatTime(Settings.getStringPref(appContext, "timeFormat", appWidgetId), calendarEvent.getStartDate()));
-                    } else if (calendarEvent.getStartDate().compareTo(now) > 0) {
+                    } else /*if (calendarEvent.getStartDate().compareTo(now) > 0)*/ {
                         if (!Settings.getBoolPref(appContext, "groupByDate", appWidgetId)) {
                             sb.append(Settings.formatDate(Settings.getStringPref(appContext, "shortDateFormat", appWidgetId), calendarEvent.getStartDate()));
                         }
@@ -171,7 +189,8 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 if (calendarEvent.getEndDate().getTime() != 0) {
-                    boolean endIsToday = DateUtils.isInSameDay(calendarEvent.getEndDate(), now);
+                    //boolean endIsToday = DateUtils.isInSameDay(calendarEvent.getEndDate(), now);
+                    boolean endIsToday = false;
                     boolean showDue = calendarEvent instanceof TaskEvent && !endIsToday;
                     if (endIsToday && !calendarEvent.isAllDay()) {
                         if (!isTask) {
@@ -273,6 +292,22 @@ public class MainActivity extends AppCompatActivity {
                     //v.setOnClickFillInIntent(R.id.viewCalendarEvent, intent);
 
                 }
+                Button btn=((Button) v.findViewById(R.id.btn_snooze));
+                btn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Log.w("MYCALENDAR","snooze button clicked for entry #"+position);
+                        EventItem item = events.get(position);
+                    }
+                });
+                btn=((Button) v.findViewById(R.id.btn_dismiss));
+                btn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Log.w("MYCALENDAR","dismiss button clicked for entry #"+position);
+                        EventItem item = events.get(position);
+                    }
+                });
             }
             return(v);
         }
@@ -292,8 +327,11 @@ public class MainActivity extends AppCompatActivity {
         events = Events.getEvents(appWidgetId);
         Log.w("MYCALENDAR","got events: "+events.size());
 
+        String[] vals=new String[events.size()];
+        for(int i=0;i<vals.length;vals[i++]="");
+
         ListView l = findViewById(R.id.lvEvents);
-        MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(this, tutorials);
+        MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(this,vals);
         l.setAdapter(adapter);
     }
 

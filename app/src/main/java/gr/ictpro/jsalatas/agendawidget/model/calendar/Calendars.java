@@ -44,7 +44,7 @@ public class Calendars {
             String name = cur.getString(2);
             int color = cur.getInt(3);
 
-            Calendar c = new Calendar(id, accountName, name, color);
+            Calendar c = new Calendar(id, accountName, name+"(ID="+id+")", color);
             result.add(c);
         }
         cur.close();

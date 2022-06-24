@@ -1,0 +1,15 @@
+[submodule "lib-recur"]
+	path = lib-recur
+	url = https://github.com/dmfs/lib-recur.git
+[submodule "rfc5545-datetime"]
+	path = rfc5545-datetime
+	url = https://github.com/dmfs/rfc5545-datetime.git
+[submodule "jems"]
+	path = jems
+	url = https://github.com/dmfs/jems.git
+[submodule "jems2"]
+	path = jems2
+	url = https://github.com/dmfs/jems.git
+[submodule "app/src/main/java/org/dmfs/jems2"]
+	path = app/src/main/java/org/dmfs/jems2
+	url = https://github.com/dmfs/jems.git

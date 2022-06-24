@@ -13,6 +13,12 @@ buildscript {
         // in the individual module build.gradle files
     }
 }
+// How to use dmfs/lib-recur:
+//      https://www.androidauthority.com/add-a-github-library-to-android-studio-using-maven-jcenter-jitpack-777050/
+// Look under "Using JitPack"
+// lib-recur's URL: https://github.com/dmfs/lib-recur
+// (I forked it just in case)
+
 allprojects {
     repositories {
         jcenter()

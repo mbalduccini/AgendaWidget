@@ -155,6 +155,7 @@ public class CalendarEvent implements EventItem {
         return title.compareTo(other.title);
     }
 
+    // TODO: this method behaves very strangely for events that are in the past. It sets it start date to now, which causes 1-day events to be flagged as multi-day events
     public boolean isMultiDay() {
         Date now = GregorianCalendar.getInstance().getTime();
         Date currentStart;

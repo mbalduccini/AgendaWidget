@@ -17,6 +17,7 @@ public class Events {
     public static List<EventItem> getEvents(int appWidgetId) {
         List<EventItem> events = new ArrayList<>();
 
+        // [MB] switching to ExtendedCalendars
 //        events.addAll(Calendars.getEvents(appWidgetId));
         events.addAll(ExtendedCalendars.getEvents(appWidgetId)); // [MB]
         events.addAll(Tasks.getEvents(appWidgetId));

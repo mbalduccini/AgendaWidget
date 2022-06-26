@@ -39,6 +39,7 @@ public class AgendaWidgetConfigureActivity extends AppCompatActivity {
     private static final int BACKUP_FILE_WRITE = 4;
     private static final int BACKUP_FILE_READ = 5;
     static final int PERMISSIONS_REQUEST_TASK_PROVIDER = 6;
+    static final int PERMISSIONS_REQUEST_WRITE_CALENDAR = 7;
 
     private SettingDialog<?> pendingPermissionsSettingsDialog;
 
@@ -234,6 +235,21 @@ public class AgendaWidgetConfigureActivity extends AppCompatActivity {
                     }
                 }
                 pendingPermissionsSettingsDialog = null;
+                break;
+            }
+            case PERMISSIONS_REQUEST_WRITE_CALENDAR: {
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    Fragment f = (Fragment) viewPager.getAdapter().instantiateItem(viewPager, viewPager.getCurrentItem());
+
+                    ListView l = (ListView) f.getView().findViewById(R.id.lst_settings);
+                    SettingsListAdapter adapter = (SettingsListAdapter) l.getAdapter();
+                    int index = adapter.indexOf("calendars");
+                    if (index != -1) {
+                        l.performItemClick(l.getAdapter().getView(index, null, null),
+                                index, l.getAdapter().getItemId(index));
+                    }
+                }
                 break;
             }
         }

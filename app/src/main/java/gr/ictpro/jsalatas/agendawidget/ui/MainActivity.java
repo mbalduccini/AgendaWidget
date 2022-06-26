@@ -55,6 +55,7 @@ import org.dmfs.rfc5545.recur.RecurrenceRuleIterator;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
@@ -65,10 +66,13 @@ import gr.ictpro.jsalatas.agendawidget.model.EventItem;
 import gr.ictpro.jsalatas.agendawidget.model.Events;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.CalendarEvent;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.DayGroup;
+import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent;
+import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars;
 import gr.ictpro.jsalatas.agendawidget.model.settings.*;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskContract;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskEvent;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
+import gr.ictpro.jsalatas.agendawidget.model.task.Tasks;
 import gr.ictpro.jsalatas.agendawidget.service.AgendaWidgetService;
 import gr.ictpro.jsalatas.agendawidget.ui.widgets.SettingDialog;
 import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
@@ -306,6 +310,43 @@ public class MainActivity extends AppCompatActivity {
                     public void onClick(View v) {
                         Log.w("MYCALENDAR","dismiss button clicked for entry #"+position);
                         EventItem item = events.get(position);
+
+                        if (item instanceof ExtendedCalendarEvent) {
+                            ExtendedCalendars.dismissCalDAVEventReminders(item);
+                            events.remove(position);
+                            refreshListCached();
+                        }
+                    }
+                });
+                btn=((Button) v.findViewById(R.id.btn_dump));
+                btn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Log.w("MYCALENDAR","dump button clicked for entry #"+position);
+                        EventItem item = events.get(position);
+                        if (item instanceof ExtendedCalendarEvent) {
+                            ((ExtendedCalendarEvent)item).dumpExtendedPropertiesForEvent();
+                        }
+                    }
+                });
+                btn=((Button) v.findViewById(R.id.btn_test));
+                btn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        if (!AgendaWidgetConfigureActivity.checkForPermission(AgendaWidgetApplication.getActivity(context), Manifest.permission.READ_CALENDAR, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_READ_CALENDAR, false)) {
+                            ActivityCompat.requestPermissions(AgendaWidgetApplication.getActivity(context), new String[]{Manifest.permission.READ_CALENDAR}, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_READ_CALENDAR);
+                            return;
+                        }
+                        if (!AgendaWidgetConfigureActivity.checkForPermission(AgendaWidgetApplication.getActivity(context), Manifest.permission.WRITE_CALENDAR, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_WRITE_CALENDAR, false)) {
+                            ActivityCompat.requestPermissions(AgendaWidgetApplication.getActivity(context), new String[]{Manifest.permission.WRITE_CALENDAR}, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_WRITE_CALENDAR);
+                            return;
+                        }
+
+                        Log.w("MYCALENDAR","run-tests button clicked for entry #"+position);
+                        EventItem item = events.get(position);
+                        if (item instanceof ExtendedCalendarEvent) {
+                            ((ExtendedCalendarEvent)item).runTests();
+                        }
                     }
                 });
             }
@@ -323,9 +364,24 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
+        refreshList();
+    }
+
+    public void refreshList() {
         Log.w("MYCALENDAR","about to get events");
         events = Events.getEvents(appWidgetId);
         Log.w("MYCALENDAR","got events: "+events.size());
+
+        String[] vals=new String[events.size()];
+        for(int i=0;i<vals.length;vals[i++]="");
+
+        ListView l = findViewById(R.id.lvEvents);
+        MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(this,vals);
+        l.setAdapter(adapter);
+    }
+
+    public void refreshListCached() {
+        Log.w("MYCALENDAR","cached events: "+events.size());
 
         String[] vals=new String[events.size()];
         for(int i=0;i<vals.length;vals[i++]="");
@@ -348,7 +404,8 @@ public class MainActivity extends AppCompatActivity {
 
     public void runGetEvents(View view) {
         Log.w("MYCALENDAR","about to get events");
-        events = Events.getEvents(appWidgetId);
+        //events = Events.getEvents(appWidgetId);
+        refreshList();
         Log.w("MYCALENDAR","got events: "+events.size());
     }
 }

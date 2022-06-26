@@ -2,6 +2,9 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/jems" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/jems2" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/lib-recur" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/rfc5545-datetime" vcs="Git" />
   </component>
 </project>

@@ -3,6 +3,7 @@ package gr.ictpro.jsalatas.agendawidget.model.calendar;
 import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -10,7 +11,9 @@ import android.provider.CalendarContract;
 import android.support.annotation.ColorInt;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
+import android.widget.TextView;
 
+import org.dmfs.jems2.function.SingleFunction;
 import org.dmfs.rfc5545.DateTime;
 import org.dmfs.rfc5545.Duration;
 import org.dmfs.rfc5545.recur.InvalidRecurrenceRuleException;
@@ -21,6 +24,7 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
@@ -29,13 +33,24 @@ import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.TimeZone;
 
+import gr.ictpro.jsalatas.agendawidget.R;
 import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
 import gr.ictpro.jsalatas.agendawidget.model.EventItem;
 import gr.ictpro.jsalatas.agendawidget.model.Events;
 import gr.ictpro.jsalatas.agendawidget.model.settings.Settings;
+import gr.ictpro.jsalatas.agendawidget.model.task.TaskEvent;
 import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
 import gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities;
 
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.EXTENDED_PROPERTIES_DEFAULT_NAMESPACE;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.deleteFromMultilinePropertyValue;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.getAbsoluteExtPropID;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.infinityDateMillis;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.infinityDateStr;
+import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.dateToMillis;
+import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.dateToSeconds;
+import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.millisToDate;
+import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.secondsToDate;
 import static java.lang.Integer.min;
 import static java.lang.Long.max;
 
@@ -44,39 +59,159 @@ public class ExtendedCalendars extends Calendars {
     public static List<EventItem> getEvents(int appWidgetId) {
         return(getEvents(appWidgetId,new ExtendedCalendarFetchAdapter()));
     }
+
+    public static void dismissCalDAVEventReminders(EventItem event) {
+
+        String ext_selection;
+        String[] ext_projection;
+        Cursor cur;
+
+        if (event instanceof ExtendedCalendarEvent && !(event instanceof TaskEvent)) {
+            ExtendedCalendarEvent calendarEvent = (ExtendedCalendarEvent) event;
+
+            // TODO: see if these are needed
+            //val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+            //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+
+
+            long curTimeSec=System.currentTimeMillis() / 1000L;
+
+            boolean is_repeat=(calendarEvent.getRrule()!=null);
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): setting properties for event "+calendarEvent.getTitle()+"; (is_repeat="+is_repeat+")");
+
+            String dtStr=infinityDateStr;
+            if (is_repeat) {
+                dtStr=ISO8601Utilities.formatDateTimeCompact(secondsToDate(max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1));
+            }
+            calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
+            calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-LASTACK",dtStr);
+
+            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
+            ext_projection = new String[]{
+                    CalendarContract.ExtendedProperties._ID,
+                    CalendarContract.ExtendedProperties.VALUE,
+            };
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+            ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+            Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+            while (cur.moveToNext()) {
+                String v = cur.getString(1);
+                String v2=deleteFromMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME");
+                if (!v.equals(v2)) {
+                    if (!v2.equals("")) {
+                        calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed from private:http://emclient.com/ns/#calendar");
+                    }
+                    else {
+                        calendarEvent.deleteExtendedProperty(cur.getLong(0));
+                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed (full private:http://emclient.com/ns/#calendar property removed)");
+                    }
+                }
+            }
+            cur.close();
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): done setting properties for calendarEvent with title "+ calendarEvent.getTitle());
+
+            // Remove X-MOZ-SNOOZE-TIME if present
+            calendarEvent.deleteExtendedPropertyJSonEncoded("X-MOZ-SNOOZE-TIME", null);
+            Log.v("MYCALENDAR", "X-MOZ-SNOOZE-TIME deleted if it exists");
+
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): before storing ACK-C");
+
+            for (ExtendedCalendarEvent.Reminder r : calendarEvent.getReminders()) {
+                int type = (r.type == CalendarContract.Reminders.METHOD_EMAIL)? ExtendedCalendarEvent.Reminder.REMINDER_EMAIL : ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION;
+                int method=(r.type == ExtendedCalendarEvent.Reminder.REMINDER_EMAIL) ? CalendarContract.Reminders.METHOD_EMAIL : CalendarContract.Reminders.METHOD_ALERT;
+
+                long absolute_extprop_id=getAbsoluteExtPropID(calendarEvent.getId(), method, r.minutes);
+                boolean is_absolute=(absolute_extprop_id!=-1L);
+                if (is_absolute) {
+                    String selection = CalendarContract.Reminders.EVENT_ID + " = "+calendarEvent.getId()+" AND "+ CalendarContract.Reminders.METHOD+" = "+method+" AND "+ CalendarContract.Reminders.MINUTES+" = "+r.minutes;
+                    cr.delete(CalendarContract.Reminders.CONTENT_URI, selection, null);
+                    Log.v("MYCALENDAR", "done with is_absolute branch");
+                }
+                else {
+                    Log.v("MYCALENDAR", "in !is_absolute branch");
+                    ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                    ext_projection = new String[]{
+                            CalendarContract.ExtendedProperties._ID,
+                            CalendarContract.ExtendedProperties.VALUE,
+                    };
+                    long ack = -1L;
+                    String ACK_SEP = ";";
+                    String pname1 = "X-CALDAV-ANDROID-ACK";
+                    String pname2 = "X-CALDAV-ANDROID-MOZACK";
+                    String prefix1 = "[\"" + pname1 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP;
+                    String prefix2 = "[\"" + pname2 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP;
+                    boolean prefix1_found=false;
+                    boolean prefix2_found=false;
+                    Date startTS = calendarEvent.getStartDate();
+                    long notifTS2=infinityDateMillis;
+                    if (is_repeat)
+                        notifTS2=max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1;
+
+                    cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                    while (cur.moveToNext()) {
+                        long ext_prop_id = cur.getLong(0);
+                        String v = cur.getString(1);
+                        Log.v("MYCALENDAR", "got reminder ext-prop; id=" + ext_prop_id + "; value=" + v);
+
+                        Log.v("MYCALENDAR", "checking startsWith of " + pname1 + " or " + pname2);
+                        int res = 0;   // 0=not found; 1=ACK; 2=MOZACK
+                        String prefix = "";
+                        String pname = "";
+                        if (v.startsWith(prefix1)) {
+                            res = 1;
+                            prefix = prefix1;
+                            pname = pname1;
+                            prefix1_found=true;
+                        } else if (v.startsWith(prefix2)) {
+                            res = 2;
+                            prefix = prefix2;
+                            pname = pname2;
+                            prefix2_found=true;
+                        }
+                        if (res != 0) {
+                            long t = Long.parseLong(v.substring(prefix.length(), v.length() - 2)) / 1000L;
+                            Log.v("MYCALENDAR", "it's a match for method+minutes!! remaining=" + t);
+                            ack = max(ack, t);
+
+                            Log.v("MYCALENDAR", "ack=" + ack + "; startTS=" + startTS + "; remind time=" + (dateToSeconds(startTS) - r.minutes * 60));
+                            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): ack<startTS+remind: changing ack to +inf for time " + (dateToSeconds(startTS) - r.minutes * 60));
+
+                            calendarEvent.updateExtendedProperty(
+                                    ext_prop_id,
+                                    "[\"" + pname + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + notifTS2 + "\"]");
+                        }
+                    }
+                    cur.close();
+
+                    if (!prefix1_found) {
+                        calendarEvent.addExtendedProperty(
+                                EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                                "[\"" + pname1 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + notifTS2 + "\"]");
+                    }
+                    if (!prefix2_found) {
+                        calendarEvent.addExtendedProperty(
+                                EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                                "[\"" + pname2 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + notifTS2 + "\"]");
+                    }
+                }
+            }
+
+            // remove davx5 properties if this is a Google Calendar
+            calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();
+
+            // TODO: cause the reminder listview to be refreshed
+        }
+    }
 }
 
 class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
-    /* [MB] data exchange with calendar providers */
-    //finel static String EXTENDED_PROPERTIES_DEFAULT_NAMESPACE = "vnd.android.cursor.item/vnd.ical4android.unknown-property";
-    final static String EXTENDED_PROPERTIES_DEFAULT_NAMESPACE = "vnd.android.cursor.item/vnd.i4a.unkp";   // [MB] shortened due to limitations of Google Calendar provider
-
     /* parameters for debugging */
     final static boolean useDateRange=false; // only fetch events from the given date range
 
-    // absoluteTS==-1L means reminder is relative;
-    // if absoluteTS!=-1L, then minutes should be disregarded when scheduling the notifications
-    class Reminder {
-        public final static int REMINDER_NOTIFICATION=0;
-        public final static int REMINDER_EMAIL=1;
-
-        int minutes;
-        int type;
-        long ack=-1L;
-        long absoluteTS=-1L;
-
-        public Reminder(int minutes,int type) {
-            this.minutes=minutes;
-            this.type=type;
-        }
-
-        public Reminder(int minutes,int type,long ack, long absoluteTS) {
-            this.minutes=minutes;
-            this.type=type;
-            this.ack=ack;
-            this.absoluteTS=absoluteTS;
-        }
-    }
+    final static boolean DEBUG=true;
 
     String readFromMultilinePropertyValue(String blob,String key,String defaultValue) {
         String[] lines=blob.replace("\r", "").split("\n");
@@ -91,26 +226,8 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         return(defaultValue);
     }
 
-    long dateToMillis(Date d) {
-        return((long)(d.getTime()));
-    }
-
-    long dateToSeconds(Date d) {
-        return((long)(d.getTime()/1000L));
-    }
-
-    Date millisToDate(long ts) {
-        java.util.Calendar calendarInstance = GregorianCalendar.getInstance();
-        calendarInstance.setTimeInMillis(ts);
-        return(calendarInstance.getTime());
-    }
-
-    Date secondsToDate(long ts) {
-        return(millisToDate(ts*1000L));
-    }
-
-    List<Reminder> getCalDAVEventReminders(long eventId, int calendarId, Date startDate) {
-        List<Reminder> reminders = new ArrayList<>();
+    List<ExtendedCalendarEvent.Reminder> getCalDAVEventReminders(long eventId, int calendarId, Date startDate) {
+        List<ExtendedCalendarEvent.Reminder> reminders = new ArrayList<>();
         Cursor cur;
         long startTS=dateToSeconds(startDate);
 
@@ -151,31 +268,41 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             Date dt;
             if (n.equals("private:X-MOZ-LASTACK") || n.equals("X-MOZ-LASTACK")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.toString());//.plusMillis(offset)
-                Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
-                main_ack=max(main_ack, dateToSeconds(dt));
+                if (dt!=null) {
+                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    main_ack = max(main_ack, dateToSeconds(dt));
+                }
             }
             else if (n == EXTENDED_PROPERTIES_DEFAULT_NAMESPACE && v.toString().startsWith("[\"X-MOZ-SNX-MOZ-LASTACK\",\"")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.substringAfter(",").substringAfter("\"").substringBefore("\"").toString());
-                Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
-                main_ack=max(main_ack, dateToSeconds(dt));
+                if (dt!=null) {
+                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    main_ack = max(main_ack, dateToSeconds(dt));
+                }
             }
             else if (n == "private:X-MOZ-SNOOZE-TIME" || n == "X-MOZ-SNOOZE-TIME") {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.toString());
-                Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
-                main_snooze=max(main_snooze, dateToSeconds(dt));
+                if (dt!=null) {
+                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    main_snooze = max(main_snooze, dateToSeconds(dt));
+                }
             }
             else if (n == EXTENDED_PROPERTIES_DEFAULT_NAMESPACE && v.toString().startsWith("[\"X-MOZ-SNOOZE-TIME\",\"")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.substringAfter(",").substringAfter("\"").substringBefore("\"").toString());
-                Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
-                main_snooze=max(main_snooze, dateToSeconds(dt));
+                if (dt!=null) {
+                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    main_snooze = max(main_snooze, dateToSeconds(dt));
+                }
             }
             else if (n == "private:http://emclient.com/ns/#calendar") {
                 String v2=readFromMultilinePropertyValue(v.toString(), "X-MOZ-SNOOZE-TIME", "");
                 Log.v("MYCALENDAR", "received from readFromMultilinePropertyValue() for event_id=" + eventId + ": "+v2);
                 if (!v2.equals("")) {
                     dt=ISO8601Utilities.parseDateTimeCompact(v2);
-                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
-                    main_snooze=max(main_snooze, dateToSeconds(dt));
+                    if (dt!=null) {
+                        Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                        main_snooze = max(main_snooze, dateToSeconds(dt));
+                    }
                 }
             }
         }
@@ -198,7 +325,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             int method = cur.getInt(1);
             Log.v("MYCALENDAR", "got event reminder; event_id=" + eventId + "; min=" + minutes + "; method=" + method);
             if (method == CalendarContract.Reminders.METHOD_ALERT || method == CalendarContract.Reminders.METHOD_EMAIL) {
-                int type = (method == CalendarContract.Reminders.METHOD_EMAIL)? Reminder.REMINDER_EMAIL : Reminder.REMINDER_NOTIFICATION;
+                int type = (method == CalendarContract.Reminders.METHOD_EMAIL)? ExtendedCalendarEvent.Reminder.REMINDER_EMAIL : ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION;
 
                 // TODO: see if I can avoid this extra lookup into ExtendedProperties, since I have already fetched the values before
                 String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId+" AND "+CalendarContract.ExtendedProperties.NAME+" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
@@ -240,6 +367,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                         }
                     }
                 }
+                ext_cur.close();
                 boolean ack_is_inf=(ack==253402300739L);
                 Log.v("MYCALENDAR", "ack=" + ack + "; startTS=" + startTS + "; remind time=" + (startTS - minutes * 60) + "; is_absolute=" + is_absolute + "; ack_is_inf?" + ack_is_inf);
                 if (is_absolute && !ack_is_inf && main_snooze!=-1L) {
@@ -268,7 +396,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     // end [MB]
                     if (ack==-1L) Log.v("MYCALENDAR", "creating a reminder with ack=-1 for an event!!!");
                     max_ack=max(max_ack, ack);
-                    Reminder reminder = new Reminder(minutes, type, ack,(is_absolute) ? (startTS-minutes*60) : -1L); // [MB] ack added and absoluteTS added; see Reminder class for details
+                    ExtendedCalendarEvent.Reminder reminder = new ExtendedCalendarEvent.Reminder(minutes, type, ack,(is_absolute) ? (startTS-minutes*60) : -1L); // [MB] ack added and absoluteTS added; see Reminder class for details
                     reminders.add(reminder);
                 }
             }
@@ -276,13 +404,13 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         if (main_snooze!=-1L && !found_absolute) {
             int minutes=(int)((startTS-main_snooze)/60);
             Log.v("MYCALENDAR", "creating a reminder for main_snooze with ack="+max_ack+", minutes="+minutes+"; absoluteTS="+main_snooze);
-            Reminder reminder = new Reminder(minutes, Reminder.REMINDER_NOTIFICATION, max_ack, main_snooze);  // [MB] ack added and absoluteTS added; see Reminder class for details
+            ExtendedCalendarEvent.Reminder reminder = new ExtendedCalendarEvent.Reminder(minutes, ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION, max_ack, main_snooze);  // [MB] ack added and absoluteTS added; see Reminder class for details
             reminders.add(reminder);
         }
 
-        class sortByMinutes implements Comparator<Reminder>
+        class sortByMinutes implements Comparator<ExtendedCalendarEvent.Reminder>
         {
-            public int compare(Reminder a, Reminder b)
+            public int compare(ExtendedCalendarEvent.Reminder a, ExtendedCalendarEvent.Reminder b)
             {
                 return(a.minutes - b.minutes);
             }
@@ -292,7 +420,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         return(reminders);
     }
 
-    Date getFirstActiveInstance(Date startDate,String rrule,Reminder r) {
+    Date getFirstActiveInstance(Date startDate,String rrule,ExtendedCalendarEvent.Reminder r) {
         /*
          * I was unable to import lib-recur (https://github.com/dmfs/lib-recur) as a module.
          * So I did the following:
@@ -497,8 +625,8 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             */
             /* end [MB] */
 
-            List<Reminder> reminders=getCalDAVEventReminders(id, calendarId, startDate);
-            for(Reminder r : reminders) {
+            List<ExtendedCalendarEvent.Reminder> reminders=getCalDAVEventReminders(id, calendarId, startDate);
+            for(ExtendedCalendarEvent.Reminder r : reminders) {
                 Log.w("MYCALENDAR","has reminder: type="+r.type+"; minutes="+r.minutes+"; absoluteTS="+r.absoluteTS+"; ack="+r.ack);
             }
             Log.w("MYCALENDAR","working on reminders for calendarEvent title="+title+"; allDay="+allDay+"; startDate="+startDate+"; endDate="+cur.getLong(8)+"/"+endDate+"/"+endDate.getTime()+"; rrule="+rrule+"; originalId="+originalId+"; hasAlarm="+hasAlarm+"; calendarId="+calendarId+"; eventTZ="+eventTimezone+"; calendarTZ="+ calendarTimezone+"; # reminders="+reminders.size());
@@ -511,11 +639,11 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             //val reminderSeconds = validReminders.reversed().map { Pair(it.minutes * 60, it.ack)  }
             long min_notifTS=-1L;
 
-            for(Reminder r : reminders) {
+            for(ExtendedCalendarEvent.Reminder r : reminders) {
                 int reminderSeconds = r.minutes * 60;
                 long reminderAck = r.ack;
 
-                if (r.type != Reminder.REMINDER_NOTIFICATION) continue;
+                if (r.type != ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION) continue;
 
                 if (r.absoluteTS == -1L) {
                     Date refStartDate;
@@ -566,6 +694,12 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     create_notification = true;
                 }
             }
+
+            if (DEBUG && !create_notification && title.startsWith("Test ")) {
+                create_notification=true; // if we are debugging, force the displaying of all "Test xxx" events
+                title="*"+title;
+            }
+
             if (!create_notification) continue; // no need to add to the calendar
 
             Log.w("MYCALENDAR","ADDING calendarEvent title="+title+"; allDay="+allDay+"; startDate="+startDate+"; endDate="+cur.getLong(8)+"/"+endDate+"/"+endDate.getTime()+"; duration="+duration+"; rrule="+rrule+"; originalId="+originalId+"; hasAlarm="+hasAlarm+"; calendarId="+calendarId+"; eventTZ="+eventTimezone+"; calendarTZ="+ calendarTimezone+"; # reminders="+reminders.size());
@@ -595,7 +729,7 @@ common branch
 
             */
 
-            CalendarEvent e = new CalendarEvent(id, color, title, location, description, startDate, endDate, allDay);
+            ExtendedCalendarEvent e = new ExtendedCalendarEvent(id, color, title, location, description, startDate, endDate, allDay, calendarId, rrule, reminders);
             Events.adjustAllDayEvents(e);
             calendarEvents.add(e);
 

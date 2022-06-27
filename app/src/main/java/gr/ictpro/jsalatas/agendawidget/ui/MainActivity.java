@@ -373,7 +373,9 @@ public class MainActivity extends AppCompatActivity {
 
         context = getApplicationContext();
 
-        Log.w("MYCALENDAR", "HERE2");
+        // hide the title bar
+        // https://stackoverflow.com/questions/14475109/remove-android-app-title-bar
+        getSupportActionBar().hide();
 
         setContentView(R.layout.activity_main);
 

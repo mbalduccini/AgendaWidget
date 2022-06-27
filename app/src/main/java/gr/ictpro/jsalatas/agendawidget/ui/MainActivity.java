@@ -68,6 +68,7 @@ import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
 import gr.ictpro.jsalatas.agendawidget.model.EventItem;
 import gr.ictpro.jsalatas.agendawidget.model.Events;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.CalendarEvent;
+import gr.ictpro.jsalatas.agendawidget.model.calendar.CalendarFetchAdapter;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.DayGroup;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars;
@@ -388,7 +389,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                if (++elapsedMin>=10) {
+                if (++elapsedMin>=ExtendedCalendars.LOOKAHEAD_MINUTES) {
                     elapsedMin=0;
                     refreshList();
                 }
@@ -396,7 +397,7 @@ public class MainActivity extends AppCompatActivity {
                     refreshListCached();
                 }
             }
-        }, 0, (60L*1000L)); // delay in ms
+        }, 0, (60L*1000L)); // every 1 min
 
     }
 

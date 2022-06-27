@@ -55,9 +55,10 @@ import static java.lang.Integer.min;
 import static java.lang.Long.max;
 
 public class ExtendedCalendars extends Calendars {
+    public static int LOOKAHEAD_MINUTES=10;
 
     public static List<EventItem> getEvents(int appWidgetId) {
-        return(getEvents(appWidgetId,new ExtendedCalendarFetchAdapter()));
+        return(getEvents(appWidgetId,new ExtendedCalendarFetchAdapter(LOOKAHEAD_MINUTES)));
     }
 
     public static void dismissCalDAVEventReminders(EventItem event) {
@@ -213,9 +214,13 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
 
     // Events that will get triggered in the future within this number of minutes
     // will be returned by fetchCalendarEvents()
-    final static int LOOKAHEAD_MINUTES=10;
+    int LOOKAHEAD_MINUTES;
 
     final static boolean DEBUG=true;
+
+    public ExtendedCalendarFetchAdapter(int LOOKAHEAD_MINUTES) {
+        this.LOOKAHEAD_MINUTES=LOOKAHEAD_MINUTES;
+    }
 
     String readFromMultilinePropertyValue(String blob,String key,String defaultValue) {
         String[] lines=blob.replace("\r", "").split("\n");

@@ -68,12 +68,14 @@ public class ExtendedCalendarEvent extends CalendarEvent {
     private final int calendarId;
     private final String rrule;
     private final List<Reminder> reminders;
+    private final Date trigger;
 
-    protected ExtendedCalendarEvent(long id, int color, String title, String location, String description, Date startDate, Date endDate, boolean allDay, int calendarId, String rrule,List<Reminder> reminders) {
+    protected ExtendedCalendarEvent(long id, int color, String title, String location, String description, Date startDate, Date endDate, boolean allDay, int calendarId, String rrule,List<Reminder> reminders, Date trigger) {
         super(id, color, title, location, description, startDate, endDate, allDay);
         this.calendarId=calendarId;
         this.rrule=rrule;
         this.reminders=reminders;
+        this.trigger=trigger;
     }
 
     public int getCalendarId() {
@@ -86,6 +88,13 @@ public class ExtendedCalendarEvent extends CalendarEvent {
 
     public List<Reminder> getReminders() {
         return(reminders);
+    }
+
+    public Date getTrigger() { return(trigger); }
+
+    public boolean isTriggered() {
+        Date now = GregorianCalendar.getInstance().getTime();
+        return(now.compareTo(getTrigger())>=0);
     }
 
 
@@ -516,6 +525,21 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         }
         cur.close();
         Log.v("MYCALENDAR", "in deleteDavx5PropertiesFromGoogleCalendar(): done removing davx5 properties if this is a Google Calendar");
+    }
+
+
+    @Override
+    public int compareTo(EventItem o) {
+        if (!(o instanceof ExtendedCalendarEvent)) {
+            return(super.compareTo(o));
+        }
+
+        // triggered events come first
+        boolean tr1=isTriggered();
+        boolean tr2=((ExtendedCalendarEvent)o).isTriggered();
+        if (tr1==tr2) return(super.compareTo(o));
+        if (tr1) return(-1);
+        return(1);
     }
 
 }

@@ -14,6 +14,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -59,6 +60,8 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import gr.ictpro.jsalatas.agendawidget.R;
 import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
@@ -85,6 +88,15 @@ public class MainActivity extends AppCompatActivity {
 
     List<EventItem> events = new ArrayList<>();
     public static int appWidgetId=1;
+
+    // Stay open when keyboard is connected/disconnected
+    // https://stackoverflow.com/questions/4116058/avoiding-application-restart-when-hardware-keyboard-opens
+    @Override
+    public void onConfigurationChanged(final Configuration newConfig)
+    {
+        // Ignore orientation change to keep activity from restarting
+        super.onConfigurationChanged(newConfig);
+    }
 
     public class MySimpleArrayAdapter extends ArrayAdapter<String> {
         private final Context context;
@@ -360,35 +372,76 @@ public class MainActivity extends AppCompatActivity {
 
         context = getApplicationContext();
 
-        Log.w("MYCALENDAR","HERE2");
+        Log.w("MYCALENDAR", "HERE2");
 
         setContentView(R.layout.activity_main);
 
         refreshList();
+
+        new Timer().scheduleAtFixedRate(new TimerTask() {
+            int elapsedMin=0;
+            boolean firstRun=true;
+            @Override
+            public void run() {
+                if (firstRun) {
+                    firstRun=false;
+                    return;
+                }
+
+                if (++elapsedMin>=10) {
+                    elapsedMin=0;
+                    refreshList();
+                }
+                else {
+                    refreshListCached();
+                }
+            }
+        }, 0, (60L*1000L)); // delay in ms
+
+    }
+
+    int numTriggeredEvents() {
+        int cnt=0;
+        for(EventItem e : events) {
+            if ((!(e instanceof ExtendedCalendarEvent)) || ((ExtendedCalendarEvent)e).isTriggered()) cnt++;
+        }
+        return(cnt);
     }
 
     public void refreshList() {
         Log.w("MYCALENDAR","about to get events");
         events = Events.getEvents(appWidgetId);
-        Log.w("MYCALENDAR","got events: "+events.size());
+        Log.w("MYCALENDAR","got events: "+events.size()+"; triggered="+numTriggeredEvents());
 
-        String[] vals=new String[events.size()];
+        String[] vals=new String[numTriggeredEvents()];
         for(int i=0;i<vals.length;vals[i++]="");
 
-        ListView l = findViewById(R.id.lvEvents);
-        MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(this,vals);
-        l.setAdapter(adapter);
+        runOnUiThread(new Runnable() {
+
+            @Override
+            public void run() {
+                ListView l = findViewById(R.id.lvEvents);
+                MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(context,vals);
+                l.setAdapter(adapter);
+            }
+        });
     }
 
     public void refreshListCached() {
-        Log.w("MYCALENDAR","cached events: "+events.size());
+        Log.w("MYCALENDAR","got cached events: "+events.size()+"; triggered="+numTriggeredEvents());
 
-        String[] vals=new String[events.size()];
+        String[] vals=new String[numTriggeredEvents()];
         for(int i=0;i<vals.length;vals[i++]="");
 
-        ListView l = findViewById(R.id.lvEvents);
-        MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(this,vals);
-        l.setAdapter(adapter);
+        runOnUiThread(new Runnable() {
+
+            @Override
+            public void run() {
+                ListView l = findViewById(R.id.lvEvents);
+                MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(context,vals);
+                l.setAdapter(adapter);
+            }
+        });
     }
 
     public void startSettings(View view) {

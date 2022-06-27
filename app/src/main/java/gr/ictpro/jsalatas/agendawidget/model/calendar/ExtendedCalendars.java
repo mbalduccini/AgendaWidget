@@ -211,6 +211,10 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
     /* parameters for debugging */
     final static boolean useDateRange=false; // only fetch events from the given date range
 
+    // Events that will get triggered in the future within this number of minutes
+    // will be returned by fetchCalendarEvents()
+    final static int LOOKAHEAD_MINUTES=10;
+
     final static boolean DEBUG=true;
 
     String readFromMultilinePropertyValue(String blob,String key,String defaultValue) {
@@ -688,9 +692,9 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             }
             boolean create_notification=false;
             if (min_notifTS != -1L) {
-                Log.w("MYCALENDAR", "found valid reminder with TS=" + min_notifTS+"; title="+title);
-                if (dateToSeconds(now)>=(min_notifTS/1000L)) {
-                    Log.w("MYCALENDAR", "found TRIGGERABLE reminder with TS=" + millisToDate(min_notifTS) + "; title=" + title);
+                Log.w("MYCALENDAR", "found min reminder with TS=" + min_notifTS+"; title="+title);
+                if ((dateToSeconds(now)+(LOOKAHEAD_MINUTES*60)>=(min_notifTS/1000L))) {
+                    Log.w("MYCALENDAR", "found TRIGGERABLE (within lookahead) reminder with TS=" + millisToDate(min_notifTS) + "; title=" + title);
                     create_notification = true;
                 }
             }
@@ -698,6 +702,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             if (DEBUG && !create_notification && title.startsWith("Test ")) {
                 create_notification=true; // if we are debugging, force the displaying of all "Test xxx" events
                 title="*"+title;
+                min_notifTS=dateToMillis(now); // Make sure it is triggerable right now
             }
 
             if (!create_notification) continue; // no need to add to the calendar
@@ -729,7 +734,7 @@ common branch
 
             */
 
-            ExtendedCalendarEvent e = new ExtendedCalendarEvent(id, color, title, location, description, startDate, endDate, allDay, calendarId, rrule, reminders);
+            ExtendedCalendarEvent e = new ExtendedCalendarEvent(id, color, title, location, description, startDate, endDate, allDay, calendarId, rrule, reminders, millisToDate(min_notifTS));
             Events.adjustAllDayEvents(e);
             calendarEvents.add(e);
 

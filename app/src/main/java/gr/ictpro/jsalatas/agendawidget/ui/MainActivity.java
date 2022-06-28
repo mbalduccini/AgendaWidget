@@ -2,40 +2,19 @@
 package gr.ictpro.jsalatas.agendawidget.ui;
 
 import android.Manifest;
-import android.app.Activity;
-import android.app.PendingIntent;
-import android.app.Service;
 import android.appwidget.AppWidgetManager;
-import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.ContentUris;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.IBinder;
-import android.os.ParcelFileDescriptor;
 import android.provider.CalendarContract;
 import android.support.annotation.ColorInt;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
-import android.support.v4.app.FragmentPagerAdapter;
-import android.support.v4.content.ContextCompat;
-import android.support.v4.view.ViewPager;
-import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.Toolbar;
-import android.support.design.widget.TabLayout;
 import android.text.SpannableString;
 import android.text.style.StyleSpan;
 import android.util.Log;
@@ -45,18 +24,9 @@ import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.RemoteViews;
 import android.widget.TextView;
-import android.widget.Toast;
-
-import org.dmfs.rfc5545.DateTime;
-import org.dmfs.rfc5545.recur.InvalidRecurrenceRuleException;
-import org.dmfs.rfc5545.recur.RecurrenceRule;
-import org.dmfs.rfc5545.recur.RecurrenceRuleIterator;
 
 import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Collections;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
@@ -68,7 +38,6 @@ import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
 import gr.ictpro.jsalatas.agendawidget.model.EventItem;
 import gr.ictpro.jsalatas.agendawidget.model.Events;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.CalendarEvent;
-import gr.ictpro.jsalatas.agendawidget.model.calendar.CalendarFetchAdapter;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.DayGroup;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars;
@@ -76,9 +45,6 @@ import gr.ictpro.jsalatas.agendawidget.model.settings.*;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskContract;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskEvent;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
-import gr.ictpro.jsalatas.agendawidget.model.task.Tasks;
-import gr.ictpro.jsalatas.agendawidget.service.AgendaWidgetService;
-import gr.ictpro.jsalatas.agendawidget.ui.widgets.SettingDialog;
 import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
 
 public class MainActivity extends AppCompatActivity {
@@ -309,15 +275,15 @@ public class MainActivity extends AppCompatActivity {
                     //v.setOnClickFillInIntent(R.id.viewCalendarEvent, intent);
 
                 }
-                Button btn=((Button) v.findViewById(R.id.btn_snooze));
-                btn.setOnClickListener(new View.OnClickListener() {
+                Button ibtn=v.findViewById(R.id.btn_snooze);
+                ibtn.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         Log.w("MYCALENDAR","snooze button clicked for entry #"+position);
                         EventItem item = events.get(position);
                     }
                 });
-                btn=((Button) v.findViewById(R.id.btn_dismiss));
+                Button btn=((Button) v.findViewById(R.id.btn_dismiss));
                 btn.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {

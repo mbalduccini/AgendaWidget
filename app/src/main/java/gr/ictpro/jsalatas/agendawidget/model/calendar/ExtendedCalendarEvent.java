@@ -99,10 +99,29 @@ public class ExtendedCalendarEvent extends CalendarEvent {
 
 
     public void dumpExtendedPropertiesForEvent() {
-        Log.v("MYCALENDAR", "Reminders for event titled " + getTitle());
+        Log.v("MYCALENDAR", "Cached reminders for event titled " + getTitle());
         for(Reminder r:getReminders()) {
             Log.v("MYCALENDAR", "minutes="+r.minutes+"; type="+r.type+"; ack="+r.ack+"; absoluteTS="+r.absoluteTS);
         }
+        Log.v("MYCALENDAR", "============================");
+
+
+        ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+        Uri.Builder builder = CalendarContract.Reminders.CONTENT_URI.buildUpon();
+        final String[] PROJECTION_reminders = new String[]{
+                CalendarContract.Reminders.MINUTES,
+                CalendarContract.Reminders.METHOD
+        };
+        String selection=CalendarContract.Reminders.EVENT_ID+" = "+getId();
+
+        Cursor cur = cr.query(builder.build(), PROJECTION_reminders, selection, null, null);
+        Log.v("MYCALENDAR", "Low-level reminders for event titled " + getTitle());
+        while (cur.moveToNext()) {
+            int minutes = cur.getInt(0);
+            int method = cur.getInt(1);
+            Log.v("MYCALENDAR", "min=" + minutes + "; method=" + method);
+        }
+        cur.close();
         Log.v("MYCALENDAR", "============================");
 
         String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + getId();
@@ -111,10 +130,10 @@ public class ExtendedCalendarEvent extends CalendarEvent {
                 CalendarContract.ExtendedProperties.NAME,
                 CalendarContract.ExtendedProperties.VALUE,
         };
-        ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
-        Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+        cr = AgendaWidgetApplication.getContext().getContentResolver();
+        builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
         Log.v("MYCALENDAR", "Extended properties for event titled " + getTitle());
-        Cursor cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+        cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
         while (cur.moveToNext()) {
             long id = cur.getLong(0);
             String n = cur.getString(1);
@@ -267,7 +286,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
 
     // Returns: -1L if not found; otherwise, it returns the property's ID
     long findExtendedPropertyJSonEncoded(String name, String value) {
-        Log.v("MYCALENDAR", "in findExtendedProperty(" + name + "," + value + ")");
+        Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + ")");
 
         String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "\"";
 
@@ -291,13 +310,15 @@ public class ExtendedCalendarEvent extends CalendarEvent {
                 Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + "): property found");
                 prop_id = cur.getLong(0);
             }
+            /* The code below makes no sense and does not come from my old code. I believe it must be removed
             else {
-                Log.v("MYCALENDAR", "in findExtendedProperty(" + name + "," + value + ",id=" + getId() + "): comparing " + value + " with " + v);
+                Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + ",id=" + getId() + "): comparing " + value + " with " + v);
                 if (value == null || v.equals(value)) {
-                    Log.v("MYCALENDAR", "in findExtendedProperty(" + name + "," + value + ",id=" + getId() + "): property found");
+                    Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + ",id=" + getId() + "): property found");
                     prop_id = cur.getLong(0);
                 }
             }
+            */
         }
         cur.close();
         if (prop_id == -1L) {
@@ -360,7 +381,9 @@ public class ExtendedCalendarEvent extends CalendarEvent {
             return;
         }
         try {
+            Log.v("MYCALENDAR", "in addExtendedProperty(): about to insert ext property for event " + getId() + " of name=" + name + "; value=" + value);
             cr.insert(builder.build(), content);
+            Log.v("MYCALENDAR", "in addExtendedProperty(): successfully inserted ext property for event " + getId() + " of name=" + name + "; value=" + value);
         }
         catch (Exception x) {
             Log.e("MYCALENDAR", "in addExtendedProperty(): inserting in event "+getId()+" failed for name="+name+"; value="+value);

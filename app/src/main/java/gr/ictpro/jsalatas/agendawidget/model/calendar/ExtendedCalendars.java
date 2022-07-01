@@ -61,6 +61,60 @@ public class ExtendedCalendars extends Calendars {
         return(getEvents(appWidgetId,new ExtendedCalendarFetchAdapter(LOOKAHEAD_MINUTES)));
     }
 
+    /*
+     * DISMISSING and SNOOZING
+     * [https://tools.ietf.org/html/draft-ietf-calext-valarm-extensions-00#page-5]
+     * To "snooze" an alarm, clients create a new "VALARM" component within
+     * the parent component of the "VALARM" that was triggered and is being
+     * "snoozed" (i.e., as a "sibling" component of the "VALARM" being
+     * snoozed).  The new "VALARM" MUST be set to trigger at the user's
+     * chosen "snooze" interval after the original alarm triggered.  Clients
+     * SHOULD use an absolute "TRIGGER" property with a "DATE-TIME" value
+     * specified in UTC.
+     *
+     * When the "snooze" alarm is triggered and dismissed the client SHOULD
+     * remove the corresponding "VALARM" component, or set the
+     * "ACKNOWLEDGED" property (see Section 5.1).  Alternatively, if the
+     * "snooze" alarm is itself "snoozed", the client SHOULD remove the
+     * original "snooze" alarm and create a new one, with the appropriate
+     * trigger time and relationship set.
+     *
+     * [Section 5.1]
+     * Clients SHOULD set this property to the current date-time value in
+     * UTC when a calendar user acknowledges a pending alarm.  Certain
+     * kinds of alarm may not provide feedback as to when the calendar
+     * user sees them, for example email based alerts.  For those kinds
+     * of alarms, the client SHOULD set this property when the alarm is
+     * triggered and the action successfully carried out.
+     * When an alarm is triggered on a client, clients can check to see
+     * if an "ACKNOWLEDGED" property is present.  If it is, and the value
+     * of that property is greater than or equal to the computed trigger
+     * time for the alarm, then the client SHOULD NOT trigger the alarm.
+     * Similarly, if an alarm has been triggered and an "alert" presented
+     * to a calendar user, clients can monitor the iCalendar data to
+     * determine whether an "ACKNOWLEDGED" property is added or changed
+     * in the alarm component.  If the value of any "ACKNOWLEDGED"
+     * property in the alarm changes and is greater than or equal to the
+     * trigger time of the alarm, then clients SHOULD dismiss or cancel
+     * any "alert" presented to the calendar user.
+     */
+
+    // We must mark the event dirty *before* making changes to reminders or extended proeprties.
+    // Marking it as dirty ensures that the information is sent to the cloud.
+    // https://stackoverflow.com/questions/35736822/android-calendar-provider-only-initially-created-extended-property-syncs-across
+    static void markEventDirty(ExtendedCalendarEvent event) {
+
+        ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+
+        ContentValues content = new ContentValues();
+        // The following line is not needed. An empty update is sufficient
+        //content.put(CalendarContract.Events.TITLE, event.getTitle());
+        Uri u= ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, event.getId());
+        Uri.Builder builder = u.buildUpon();
+
+        cr.update(builder.build(), content, null, null);
+    }
+
     public static void dismissCalDAVEventReminders(EventItem event) {
 
         String ext_selection;
@@ -74,6 +128,7 @@ public class ExtendedCalendars extends Calendars {
             //val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
             //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
 
+            markEventDirty(calendarEvent);
 
             long curTimeSec=System.currentTimeMillis() / 1000L;
 
@@ -200,8 +255,8 @@ public class ExtendedCalendars extends Calendars {
                 }
             }
 
-            // remove davx5 properties if this is a Google Calendar
-            calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();
+            // TODO: figure out WHEN I should call this. For sure, I can't call it right away, because the Davx5 property are the way I communicate the info to DavX5 for sending to the calendar provider!!
+            //calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();  // remove davx5 properties if this is a Google Calendar
 
             // TODO: cause the reminder listview to be refreshed
         }
@@ -215,8 +270,6 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
     // Events that will get triggered in the future within this number of minutes
     // will be returned by fetchCalendarEvents()
     int LOOKAHEAD_MINUTES;
-
-    final static boolean DEBUG=true;
 
     public ExtendedCalendarFetchAdapter(int LOOKAHEAD_MINUTES) {
         this.LOOKAHEAD_MINUTES=LOOKAHEAD_MINUTES;
@@ -429,7 +482,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         return(reminders);
     }
 
-    Date getFirstActiveInstance(Date startDate,String rrule,ExtendedCalendarEvent.Reminder r) {
+    Date getFirstActiveInstanceViaLibrary(Date startDate,String rrule,ExtendedCalendarEvent.Reminder r) {
         /*
          * I was unable to import lib-recur (https://github.com/dmfs/lib-recur) as a module.
          * So I did the following:
@@ -482,6 +535,110 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             //Log.w("MYCALENDAR","Invalid recurrence rule!!");
         }
         return(null);
+    }
+
+    // Get first active instance using Android
+    // https://developer.android.com/guide/topics/providers/calendar-provider#java
+    // Section: Query the instances table
+    Date getFirstActiveInstanceAndroid(long id, Date startDate, ExtendedCalendarEvent.Reminder r) {
+        final String DEBUG_TAG = "MYCALENDAR";
+        final String[] INSTANCE_PROJECTION = new String[] {
+                CalendarContract.Instances.BEGIN,
+        };
+
+// The indices for the projection array above.
+        final int PROJECTION_BEGIN_INDEX = 0;
+
+// Specify the date range you want to search for recurring
+// event instances
+        // Use Long.MIN_VALUE for -inf
+        long startMillis = max(Long.MIN_VALUE,((long)r.ack)*1000L);
+        long endMillis = Long.MAX_VALUE; // end date
+
+        Cursor cur;
+        ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+
+// The ID of the recurring event whose instances you are searching
+// for in the Instances table
+        String selection = CalendarContract.Instances.EVENT_ID + " = ?";
+        String[] selectionArgs = new String[] {""+id};
+
+// Construct the query with the desired date range.
+        Uri.Builder builder = CalendarContract.Instances.CONTENT_URI.buildUpon();
+        ContentUris.appendId(builder, startMillis);
+        ContentUris.appendId(builder, endMillis);
+
+// Submit the query
+        cur =  cr.query(builder.build(),
+                INSTANCE_PROJECTION,
+                selection,
+                selectionArgs,
+                null);
+
+        while (cur.moveToNext()) {
+            //long eventID = 0;
+            long beginVal = 0;
+
+            // Get the field values
+            //eventID = cur.getLong(PROJECTION_ID_INDEX);
+            beginVal = cur.getLong(PROJECTION_BEGIN_INDEX);
+
+            if ((beginVal/1000L) - r.minutes*60 > r.ack) {
+                return(millisToDate(beginVal));
+            }
+        }
+        return(null);
+    }
+
+    Date getFirstActiveInstance(long id, Date startDate, String rrule, ExtendedCalendarEvent.Reminder r, String title) {
+        Date refStartDate=getFirstActiveInstanceAndroid(id,startDate,r);
+        if (refStartDate==null) {
+            // TODO: find if this one a one-time problem. Note that the extra computation does not seem to affect the refresh time
+            // In some very rare cases (an Outlook entry), Android returned null when there should have been instance.
+            // To be safe, we fall back to using the library.
+            Log.v("MYCALENDAR", "Android computed a null recurrence. Falling back to using the library");
+            refStartDate=getFirstActiveInstanceViaLibrary(startDate,rrule,r);
+        }
+        Log.v("MYCALENDAR", "got refDate="+refStartDate+"; startDate TS="+startDate.getTime() + "; ack (min)=" +r.ack+ " for "+title);
+        return(refStartDate);
+    }
+
+    boolean isForcedDisplayEvent(String title) {
+        String[] prefixes=new String[] {
+                "Test ",
+                "AskLab 1",
+                "Call Modern Ext.",
+                "ITAC Meeting",
+                "Replacement meeting",
+                "Paper recycling week",
+                "Office Hours",
+                "Lock office hours",
+                "Rev run",
+                "Mist cuttings",
+                "DSS315-D01",
+                "DSS315-D02",
+                "Niki game",
+                "ASKLab Weekly Meeting",
+                "SDGII Weekly Sync",
+                "ASP Application Deli",
+                "Cancel walmart+",
+                "ASP Application Des",
+                "Open house Ard",
+                "Invoice Tufts",
+                "Internal meeting",
+                "TiAS cybersecurity",
+                "Spray for deer",
+                "SDG Dashboard wee",
+                "Work on ISO docu",
+                "Ly's paper",
+                "Chiamata",
+                "Tufts: papers, ",
+        };
+
+        for (String p : prefixes) {
+            if (title.startsWith(p)) return(true);
+        }
+        return(false);
     }
 
     public List<EventItem> fetchCalendarEvents(int appWidgetId,String[] calendarsList,Date selectedRangeStart,Date selectedRangeEnd) {
@@ -658,8 +815,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     Date refStartDate;
                     Date refEndDate;
                     if (rrule!=null) {
-                        refStartDate=getFirstActiveInstance(startDate,rrule,r);
-                        Log.v("MYCALENDAR", "got refDate="+refStartDate+"; startDate TS="+startDate.getTime() + "; ack (min)=" +r.ack+ " for "+title);
+                        refStartDate=getFirstActiveInstance(id,startDate,rrule,r,title);
                         if (refStartDate==null) continue;
                         refEndDate=secondsToDate(dateToSeconds(refStartDate)+(dateToSeconds(endDate)-dateToSeconds(startDate)));
                     }
@@ -684,8 +840,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                            (min_notifTS == -1L || r.absoluteTS * 1000L < min_notifTS)) {
                     min_notifTS = r.absoluteTS * 1000L;
                     if (rrule!=null) {
-                        Date refStartDate=getFirstActiveInstance(startDate,rrule,r);
-                        Log.v("MYCALENDAR", "got refDate="+refStartDate+"; startDate TS="+startDate.getTime() + "; ack (min)=" +r.ack+ "; absoluteTS="+r.absoluteTS+ " for "+title);
+                        Date refStartDate=getFirstActiveInstance(id,startDate,rrule,r,title);
                         if (refStartDate!=null) {
                             // if we can find a start date for a valid recurrence, let's use that
                             startDate=refStartDate;
@@ -704,7 +859,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                 }
             }
 
-            if (DEBUG && !create_notification && title.startsWith("Test ")) {
+            if (Settings.getBoolPref(AgendaWidgetApplication.getContext(), "debug", appWidgetId) && !create_notification && isForcedDisplayEvent(title)) {
                 create_notification=true; // if we are debugging, force the displaying of all "Test xxx" events
                 title="*"+title;
                 min_notifTS=dateToMillis(now); // Make sure it is triggerable right now

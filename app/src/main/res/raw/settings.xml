@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <settings>
     <!-- General Settings -->
+    <Bool name="debug"
+          tab="GENERAL"
+          category="@string/appearance_category"
+          title="DEBUG"
+          description="Enable debugging mode"
+          defaultValue="false"/>
     <Bool name="dropShadow"
           tab="GENERAL"
           category="@string/appearance_category"

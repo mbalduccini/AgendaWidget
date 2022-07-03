@@ -46,6 +46,7 @@ import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEve
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.deleteFromMultilinePropertyValue;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.getAbsoluteExtPropID;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.infinityDateMillis;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.infinityDateSeconds;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.infinityDateStr;
 import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.dateToMillis;
 import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.dateToSeconds;
@@ -59,6 +60,55 @@ public class ExtendedCalendars extends Calendars {
 
     public static List<EventItem> getEvents(int appWidgetId) {
         return(getEvents(appWidgetId,new ExtendedCalendarFetchAdapter(LOOKAHEAD_MINUTES)));
+    }
+
+    public static List<EventItem> refreshOneEvent(int appWidgetId,long id,List<EventItem> events) {
+/*        if (!checkPermissions()) {
+            return calendarEvents;
+        }
+ */
+
+        int pos=-1;
+        for(EventItem e : events) {
+            pos++;
+            if (e instanceof ExtendedCalendarEvent && ((ExtendedCalendarEvent)e).getId()==id) {
+                break;
+            }
+        }
+        if (pos==-1) return(events);
+
+        refreshCalendarList();
+
+        String[] calendarsList = Settings.getStringPref(AgendaWidgetApplication.getContext(), "calendars", appWidgetId).split("@@@");
+        if (calendarsList.length == 1 && calendarsList[0].isEmpty()) {
+            return(events);
+        }
+
+        TimeZone tzLocal = TimeZone.getDefault();
+
+        java.util.Calendar calendarInstance = GregorianCalendar.getInstance();
+        Date selectedRangeStart = DateUtils.dayFloor(calendarInstance.getTime());
+        calendarInstance.setTimeInMillis(selectedRangeStart.getTime() + tzLocal.getOffset(calendarInstance.getTimeInMillis()));
+        selectedRangeStart = DateUtils.dayFloor(calendarInstance.getTime());
+
+
+        Long searchPeriod = Settings.getLongPref(AgendaWidgetApplication.getContext(), "searchPeriod", appWidgetId);
+
+        calendarInstance.setTimeInMillis(selectedRangeStart.getTime() + searchPeriod);
+        Date selectedRangeEnd = DateUtils.dayCeil(calendarInstance.getTime());
+
+        List<EventItem> calendarEvents = new ArrayList<>();
+        calendarEvents.addAll(events);
+        Log.v("MYCALENDAR","removing from event list item number "+pos);
+        Log.v("MYCALENDAR","initial size of calendar list="+calendarEvents.size());
+        calendarEvents.remove(pos);
+        Log.v("MYCALENDAR","final size of calendar list="+calendarEvents.size());
+        List<EventItem> newEvents = new ExtendedCalendarFetchAdapter(LOOKAHEAD_MINUTES).fetchSingleCalendarEvent(appWidgetId,calendarsList,id,selectedRangeStart,selectedRangeEnd);
+        calendarEvents.addAll(newEvents);
+
+        Collections.sort(calendarEvents);
+
+        return(calendarEvents);
     }
 
     /*
@@ -136,11 +186,15 @@ public class ExtendedCalendars extends Calendars {
             Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): setting properties for event "+calendarEvent.getTitle()+"; (is_repeat="+is_repeat+")");
 
             String dtStr=infinityDateStr;
+            long ackTimeSec=infinityDateSeconds;
             if (is_repeat) {
-                dtStr=ISO8601Utilities.formatDateTimeCompact(secondsToDate(max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1));
+                ackTimeSec=max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1;
+                dtStr=ISO8601Utilities.formatDateTimeCompact(secondsToDate(ackTimeSec));
             }
-            calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
+
             calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-LASTACK",dtStr);
+            // The following property is only for Google Calendars (not CalDAV). It will not be read back on other devices if we are using CalDAV
+            calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
 
             ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
             ext_projection = new String[]{
@@ -193,7 +247,6 @@ public class ExtendedCalendars extends Calendars {
                             CalendarContract.ExtendedProperties._ID,
                             CalendarContract.ExtendedProperties.VALUE,
                     };
-                    long ack = -1L;
                     String ACK_SEP = ";";
                     String pname1 = "X-CALDAV-ANDROID-ACK";
                     String pname2 = "X-CALDAV-ANDROID-MOZACK";
@@ -202,9 +255,7 @@ public class ExtendedCalendars extends Calendars {
                     boolean prefix1_found=false;
                     boolean prefix2_found=false;
                     Date startTS = calendarEvent.getStartDate();
-                    long notifTS2=infinityDateMillis;
-                    if (is_repeat)
-                        notifTS2=max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1;
+                    long notifTS2=((long)ackTimeSec)*1000L;
 
                     cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
                     while (cur.moveToNext()) {
@@ -229,10 +280,8 @@ public class ExtendedCalendars extends Calendars {
                         }
                         if (res != 0) {
                             long t = Long.parseLong(v.substring(prefix.length(), v.length() - 2)) / 1000L;
-                            Log.v("MYCALENDAR", "it's a match for method+minutes!! remaining=" + t);
-                            ack = max(ack, t);
+                            Log.v("MYCALENDAR", "it's a match for method+minutes!! remaining data=" + t);
 
-                            Log.v("MYCALENDAR", "ack=" + ack + "; startTS=" + startTS + "; remind time=" + (dateToSeconds(startTS) - r.minutes * 60));
                             Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): ack<startTS+remind: changing ack to +inf for time " + (dateToSeconds(startTS) - r.minutes * 60));
 
                             calendarEvent.updateExtendedProperty(
@@ -288,7 +337,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         return(defaultValue);
     }
 
-    List<ExtendedCalendarEvent.Reminder> getCalDAVEventReminders(long eventId, int calendarId, Date startDate) {
+    List<ExtendedCalendarEvent.Reminder> getCalDAVEventReminders(long eventId, int calendarId, Date startDate, String title) {
         List<ExtendedCalendarEvent.Reminder> reminders = new ArrayList<>();
         Cursor cur;
         long startTS=dateToSeconds(startDate);
@@ -306,16 +355,15 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         // TODO: make sure that event IDs are unique across calendars. Otherwise, find a way to search for calendarId
         String selection=CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId;
         Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
-
+/*
         cur = cr.query(builder.build(), PROJECTION, selection, null, null);
         while (cur.moveToNext()) {
             String n = cur.getString(2);
             String v = cur.getString(3);
-            String cid = ""; //cur.getString(4);
-            Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v+"; calid="+cid);
+            Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; title="+title);
         }
         cur.close();
-
+*/
         /******************************************************/
         /* [MB] process private:X-MOZ-LASTACK and X-MOZ-LASTACK */
         long main_snooze=-1L;
@@ -331,38 +379,38 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             if (n.equals("private:X-MOZ-LASTACK") || n.equals("X-MOZ-LASTACK")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.toString());//.plusMillis(offset)
                 if (dt!=null) {
-                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    Log.v("MYCALENDAR", "processing event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime()+"; title="+title);
                     main_ack = max(main_ack, dateToSeconds(dt));
                 }
             }
-            else if (n == EXTENDED_PROPERTIES_DEFAULT_NAMESPACE && v.toString().startsWith("[\"X-MOZ-SNX-MOZ-LASTACK\",\"")) {
+            else if (n.equals(EXTENDED_PROPERTIES_DEFAULT_NAMESPACE) && v.toString().startsWith("[\"X-MOZ-LASTACK\",\"")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.substringAfter(",").substringAfter("\"").substringBefore("\"").toString());
                 if (dt!=null) {
-                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    Log.v("MYCALENDAR", "processing event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime()+"; title="+title);
                     main_ack = max(main_ack, dateToSeconds(dt));
                 }
             }
-            else if (n == "private:X-MOZ-SNOOZE-TIME" || n == "X-MOZ-SNOOZE-TIME") {
+            else if (n.equals("private:X-MOZ-SNOOZE-TIME") || n.equals("X-MOZ-SNOOZE-TIME")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.toString());
                 if (dt!=null) {
-                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    Log.v("MYCALENDAR", "processing event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime()+"; title="+title);
                     main_snooze = max(main_snooze, dateToSeconds(dt));
                 }
             }
-            else if (n == EXTENDED_PROPERTIES_DEFAULT_NAMESPACE && v.toString().startsWith("[\"X-MOZ-SNOOZE-TIME\",\"")) {
+            else if (n.equals(EXTENDED_PROPERTIES_DEFAULT_NAMESPACE) && v.toString().startsWith("[\"X-MOZ-SNOOZE-TIME\",\"")) {
                 dt=ISO8601Utilities.parseDateTimeCompact(v.substringAfter(",").substringAfter("\"").substringBefore("\"").toString());
                 if (dt!=null) {
-                    Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                    Log.v("MYCALENDAR", "processing event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime()+"; title="+title);
                     main_snooze = max(main_snooze, dateToSeconds(dt));
                 }
             }
-            else if (n == "private:http://emclient.com/ns/#calendar") {
+            else if (n.equals("private:http://emclient.com/ns/#calendar")) {
                 String v2=readFromMultilinePropertyValue(v.toString(), "X-MOZ-SNOOZE-TIME", "");
                 Log.v("MYCALENDAR", "received from readFromMultilinePropertyValue() for event_id=" + eventId + ": "+v2);
                 if (!v2.equals("")) {
                     dt=ISO8601Utilities.parseDateTimeCompact(v2);
                     if (dt!=null) {
-                        Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
+                        Log.v("MYCALENDAR", "processing event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; dt=" + dt.toString() + "; dt-mill=" + dt.getTime());
                         main_snooze = max(main_snooze, dateToSeconds(dt));
                     }
                 }
@@ -418,7 +466,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     if (!prefix.equals("")) {
                         Log.v("MYCALENDAR", "startsWith " + prefix);
                         long t=Long.parseLong(v.substring(prefix.length(), v.length() - 2))/1000L;
-                        Log.v("MYCALENDAR", "it's a match for method+minutes!! remaining=" + t);
+                        Log.v("MYCALENDAR", "it's a match for method+minutes!! remaining=" + t + " i.e. date "+secondsToDate(t));
                         ack=max(ack, t);
                     }
                     else {
@@ -430,7 +478,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     }
                 }
                 ext_cur.close();
-                boolean ack_is_inf=(ack==253402300739L);
+                boolean ack_is_inf=(ack==infinityDateSeconds);
                 Log.v("MYCALENDAR", "ack=" + ack + "; startTS=" + startTS + "; remind time=" + (startTS - minutes * 60) + "; is_absolute=" + is_absolute + "; ack_is_inf?" + ack_is_inf);
                 if (is_absolute && !ack_is_inf && main_snooze!=-1L) {
                     int oldminutes=minutes;
@@ -606,6 +654,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
     boolean isForcedDisplayEvent(String title) {
         String[] prefixes=new String[] {
                 "Test ",
+                "Contact Ivan",
                 "AskLab 1",
                 "Call Modern Ext.",
                 "ITAC Meeting",
@@ -633,6 +682,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                 "Ly's paper",
                 "Chiamata",
                 "Tufts: papers, ",
+
         };
 
         for (String p : prefixes) {
@@ -641,15 +691,34 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         return(false);
     }
 
+    public List<EventItem> fetchSingleCalendarEvent(int appWidgetId,String[] calendarsList,long id,Date selectedRangeStart,Date selectedRangeEnd) {
+        return(fetchCalendarEvents(appWidgetId,calendarsList,id,selectedRangeStart,selectedRangeEnd));
+    }
+
     public List<EventItem> fetchCalendarEvents(int appWidgetId,String[] calendarsList,Date selectedRangeStart,Date selectedRangeEnd) {
+        return(fetchCalendarEvents(appWidgetId,calendarsList,-1L,selectedRangeStart,selectedRangeEnd));
+    }
+
+    List<EventItem> fetchCalendarEvents(int appWidgetId,String[] calendarsList,long restrict_to_id,Date selectedRangeStart,Date selectedRangeEnd) {
         List<EventItem> calendarEvents = new ArrayList<>();
 
         StringBuilder sb = new StringBuilder();
         for (String calendar : calendarsList) {
-            if (!sb.toString().isEmpty()) {
+            if (sb.toString().isEmpty()) {
+                sb.append("(");
+            }
+            else {
                 sb.append(" OR ");
             }
             sb.append(CalendarContract.Events.CALENDAR_ID).append(" = ").append(calendar);
+        }
+        if (!sb.toString().isEmpty()) {
+            sb.append(")");
+        }
+
+        if (restrict_to_id!=-1L) {
+            if (!sb.toString().isEmpty()) sb.append(" AND ");
+            sb.append(CalendarContract.Events._ID).append(" = ").append(restrict_to_id);
         }
 
         ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
@@ -791,7 +860,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             */
             /* end [MB] */
 
-            List<ExtendedCalendarEvent.Reminder> reminders=getCalDAVEventReminders(id, calendarId, startDate);
+            List<ExtendedCalendarEvent.Reminder> reminders=getCalDAVEventReminders(id, calendarId, startDate, title);
             for(ExtendedCalendarEvent.Reminder r : reminders) {
                 Log.w("MYCALENDAR","has reminder: type="+r.type+"; minutes="+r.minutes+"; absoluteTS="+r.absoluteTS+"; ack="+r.ack);
             }

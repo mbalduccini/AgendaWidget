@@ -94,6 +94,7 @@ public class Calendars {
 
         Collections.sort(calendarEvents);
 
+        // TODO: disable groupByDate since it does not apply to our app
         if (Settings.getBoolPref(AgendaWidgetApplication.getContext(), "groupByDate", appWidgetId)) {
             // add dayGroups
             List<EventItem> tmpCalendarEvents = new ArrayList<>();

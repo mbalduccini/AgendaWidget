@@ -38,6 +38,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
 
     final static String infinityDateStr="99991231T235859Z";
     final static long infinityDateMillis=253402300739000L;
+    final static long infinityDateSeconds=253402300739L;
 
 
     // absoluteTS==-1L means reminder is relative;

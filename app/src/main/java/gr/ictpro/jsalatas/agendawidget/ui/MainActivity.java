@@ -47,6 +47,8 @@ import gr.ictpro.jsalatas.agendawidget.model.task.TaskEvent;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
 import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
 
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars.refreshOneEvent;
+
 public class MainActivity extends AppCompatActivity {
     private static Context context;
     static final String ACTION_FORCE_UPDATE = "gr.ictpro.jsalatas.agendawidget.action.FORCE_UPDATE";
@@ -292,7 +294,8 @@ public class MainActivity extends AppCompatActivity {
 
                         if (item instanceof ExtendedCalendarEvent) {
                             ExtendedCalendars.dismissCalDAVEventReminders(item);
-                            events.remove(position);
+                            //events.remove(position);
+                            events=refreshOneEvent(appWidgetId,((ExtendedCalendarEvent)item).getId(),events);
                             refreshListCached();
                         }
                     }

@@ -363,6 +363,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
             return(null);
         }
         return(uri.buildUpon()
+                // TODO: should this be false???
                 .appendQueryParameter(android.provider.ContactsContract.CALLER_IS_SYNCADAPTER, "true")
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, acct_name))
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, getAccountType(acct_name));

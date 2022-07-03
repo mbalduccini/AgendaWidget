@@ -7,10 +7,14 @@ import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.database.ContentObserver;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Handler;
 import android.provider.CalendarContract;
 import android.support.annotation.ColorInt;
 import android.support.v4.app.ActivityCompat;
@@ -32,6 +36,8 @@ import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import gr.ictpro.jsalatas.agendawidget.R;
 import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
@@ -47,6 +53,7 @@ import gr.ictpro.jsalatas.agendawidget.model.task.TaskEvent;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
 import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
 
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.Calendars.refreshCalendarList;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars.refreshOneEvent;
 
 public class MainActivity extends AppCompatActivity {
@@ -295,8 +302,10 @@ public class MainActivity extends AppCompatActivity {
                         if (item instanceof ExtendedCalendarEvent) {
                             ExtendedCalendars.dismissCalDAVEventReminders(item);
                             //events.remove(position);
-                            events=refreshOneEvent(appWidgetId,((ExtendedCalendarEvent)item).getId(),events);
-                            refreshListCached();
+                            synchronized(this) {
+                                events = refreshOneEvent(appWidgetId, ((ExtendedCalendarEvent) item).getId(), events);
+                                refreshListCached();
+                            }
                         }
                     }
                 });
@@ -336,6 +345,132 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    public class CalendarObserver extends ContentObserver
+    {   String calendar;
+        CalendarObserver myself;
+
+        public CalendarObserver(String calendar,Handler handler) {
+            super(handler);
+            this.calendar=calendar;
+            this.myself=this;
+        }
+
+        public boolean deliverSelfNotifications() {
+            return true;
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            onChange(selfChange, null);
+        }
+
+        // Implement the onChange(boolean, Uri) method to take advantage of the new Uri argument.
+        @Override
+        public synchronized void onChange(boolean selfChange, Uri uri) {
+            super.onChange(selfChange);
+            if (!selfChange) {
+                Log.i("MYCALENDAR", "Calendar changes; selfChange=" + selfChange + "; uri=" + uri + "; calendar=" + calendar);
+                AsyncTask.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        getContentResolver().unregisterContentObserver(myself);
+                        refreshList();
+                        getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, myself);
+                    }
+                });
+            }
+        }
+    }
+
+    void setupObserver() {
+        /*
+            https://stackoverflow.com/questions/9440993/how-to-get-calendar-change-events-is-calendar-observer-working
+            https://stackoverflow.com/questions/22245604/detect-changes-on-a-native-android-calendar
+            https://www.grokkingandroid.com/use-contentobserver-to-listen-to-changes/
+            https://stackoverflow.com/questions/4618591/android-cursor-registercontentobserver
+            https://stackoverflow.com/questions/34724101/cursor-registercontentobserver-vs-contentresolver-registercontentobserver
+         */
+
+        /*
+            IMPORTANT: to set up notifications: https://stackoverflow.com/questions/21168766/listen-for-new-calendar-events
+         */
+
+        /*
+        refreshCalendarList();
+
+        String[] calendarsList = Settings.getStringPref(AgendaWidgetApplication.getContext(), "calendars", appWidgetId).split("@@@");
+        if (calendarsList.length == 1 && calendarsList[0].isEmpty()) {
+            Log.v("MYCALENDAR","No calendars -- not registering any observers");
+            return;
+        }
+        for (String calendar : calendarsList) {
+            CalendarObserver observer = new CalendarObserver(calendar,new Handler());
+            AsyncTask.execute(new Runnable() {
+                @Override
+                public void run() {
+                    Uri MYAPP_CONTENT_URI = CalendarContract.Calendars.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.Calendars._ID, calendar).build();
+                    Log.v("MYCALENDAR","Registering for "+MYAPP_CONTENT_URI);
+                    getContentResolver().registerContentObserver(MYAPP_CONTENT_URI, false, observer);
+                }
+            });
+        }
+        */
+        CalendarObserver observer = new CalendarObserver("",new Handler());
+        AsyncTask.execute(new Runnable() {
+            @Override
+            public void run() {
+                getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+            }
+        });
+
+        /*
+        String[] projection = new String[] { "_id" };
+        Uri calendars = Uri.parse("content://calendar/calendars");
+
+        Cursor managedCursor = managedQuery(calendars, projection, null, null, null);
+        managedCursor.registerContentObserver(new CalendarObserver(new Handler()));
+         */
+
+        /*
+        getContentResolver().
+                registerContentObserver(
+                        calendars,
+                        true,
+                        new CalendarObserver(new Handler()));
+         */
+
+        /* FROM Simple Calendar
+
+    fun Context.syncCalDAVCalendars(callback: () -> Unit) {
+        calDAVRefreshCallback = callback
+        ensureBackgroundThread {
+            val uri = CalendarContract.Calendars.CONTENT_URI
+            contentResolver.unregisterContentObserver(calDAVSyncObserver)
+            contentResolver.registerContentObserver(uri, false, calDAVSyncObserver)
+            refreshCalDAVCalendars(config.caldavSyncedCalendarIds, true)
+        }
+    }
+
+    // caldav refresh content observer triggers multiple times in a row at updating, so call the callback only a few seconds after the (hopefully) last one
+    private val calDAVSyncObserver = object : ContentObserver(Handler()) {
+        override fun onChange(selfChange: Boolean) {
+            super.onChange(selfChange)
+            if (!selfChange) {
+                calDAVRefreshHandler.removeCallbacksAndMessages(null)
+                calDAVRefreshHandler.postDelayed({
+                    ensureBackgroundThread {
+                        unregisterObserver()
+                        calDAVRefreshCallback?.invoke()
+                        calDAVRefreshCallback = null
+                    }
+                }, CALDAV_REFRESH_DELAY)
+            }
+        }
+    }
+
+         */
+    }
+
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
@@ -348,8 +483,16 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        refreshList();
+        AsyncTask.execute(new Runnable() {
+            @Override
+            public void run() {
+                refreshList();
+            }
+        });
 
+        setupObserver();
+
+        /*
         new Timer().scheduleAtFixedRate(new TimerTask() {
             int elapsedMin=0;
             boolean firstRun=true;
@@ -369,7 +512,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }, 0, (60L*1000L)); // every 1 min
-
+        */
     }
 
     int numTriggeredEvents() {
@@ -380,7 +523,15 @@ public class MainActivity extends AppCompatActivity {
         return(cnt);
     }
 
+    static boolean updateInProgress=false;
     public void refreshList() {
+        synchronized(this) {
+            if (updateInProgress) {
+                Log.w("MYCALENDAR", "refreshList(): update already in progress; ignoring the additional refreshList request");
+                return;
+            }
+            updateInProgress = true;
+        }
         Log.w("MYCALENDAR","about to get events");
         events = Events.getEvents(appWidgetId);
         Log.w("MYCALENDAR","got events: "+events.size()+"; triggered="+numTriggeredEvents());
@@ -397,6 +548,9 @@ public class MainActivity extends AppCompatActivity {
                 l.setAdapter(adapter);
             }
         });
+        synchronized(this) {
+            updateInProgress = false;
+        }
     }
 
     public void refreshListCached() {

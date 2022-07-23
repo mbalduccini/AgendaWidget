@@ -67,6 +67,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".ui.MainActivity$AgendaUpdateService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="gr.ictpro.jsalatas.agendawidget.action.UPDATE"/>
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -132,5 +132,8 @@
     <string name="error_occurred">An error has occurred:</string>
     <string name="privacy">Privacy Statement</string>
 
+    <!-- Notifications -->
+    <string name="snooze">Snooze</string>
+    <string name="dismiss">Dismiss</string>
 
 </resources>

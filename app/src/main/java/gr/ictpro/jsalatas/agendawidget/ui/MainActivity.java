@@ -80,10 +80,10 @@ public class MainActivity extends AppCompatActivity {
 
     public static int appWidgetId = 1;
 
-    public static boolean NEW_INTENTS = true;//false;
+    public static boolean NEW_INTENTS = true;// this CANNOT be false. To switch to false, find a way to re-enable the block under condition "!NEW_INTENTS" that is currently commented out
 
-    // Look in AgendaWidget for a possibly better CalendarObserver
-    CalendarObserver observer = new CalendarObserver("", new Handler());
+    //// Look in AgendaWidget for a possibly better CalendarObserver
+    //CalendarObserver observer = new CalendarObserver("", new Handler());
     private final static long CALENDAR_REFRESH_DELAY = 60; // how many seconds to wait before refreshing the list when a calendar change event is received
     private final static long CALENDAR_MAX_REFRESH_WAIT = 120; // how many seconds we accept to wait when change notifications keep coming in
 
@@ -105,11 +105,11 @@ public class MainActivity extends AppCompatActivity {
         super.onConfigurationChanged(newConfig);
     }
 
-    SpannableString formatDate(Context appContext, CalendarEvent calendarEvent) {
+    static SpannableString formatDate(Context appContext, CalendarEvent calendarEvent) {
         return(formatDate(appContext, calendarEvent, true));
     }
 
-    SpannableString formatDate(Context appContext, CalendarEvent calendarEvent, boolean used_as_prefix) {
+    static SpannableString formatDate(Context appContext, CalendarEvent calendarEvent, boolean used_as_prefix) {
         StringBuilder sb = new StringBuilder();
         //boolean startIsToday = DateUtils.isInSameDay(calendarEvent.getStartDate(), now);
         boolean startIsToday = false;
@@ -179,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
         return(new SpannableString(sb.toString()));
     }
 
-    SpannableString formatTitle(Context appContext, CalendarEvent calendarEvent) {
+    static SpannableString formatTitle(Context appContext, CalendarEvent calendarEvent) {
         SpannableString spanTitle = new SpannableString(calendarEvent.getTitle());
         return(spanTitle);
     }
@@ -426,82 +426,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public class CalendarObserver extends ContentObserver
-    {   String calendar;
-        CalendarObserver myself;
-        Timer scheduledTimer;
-        long curTimeSecAtWaitStart;
-
-        public CalendarObserver(String calendar,Handler handler) {
-            super(handler);
-            this.calendar=calendar;
-            this.myself=this;
-            this.scheduledTimer=null;
-            curTimeSecAtWaitStart=-1;
-        }
-
-        public boolean deliverSelfNotifications() {
-            return true;
-        }
-
-        @Override
-        public void onChange(boolean selfChange) {
-            onChange(selfChange, null);
-        }
-
-        public void clearTimer() {
-            Log.v("MYCALENDAR", "clearing any pending CalendarObserver timers");
-            if (scheduledTimer!=null) {
-                scheduledTimer.cancel();
-                scheduledTimer=null;
-            }
-        }
-
-        void executeRefresh() {
-          Log.v("MYCALENDAR", "Inside timer's async task");
-          //getContentResolver().unregisterContentObserver(myself);
-          refreshList();
-          //getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, myself);
-          Log.v("MYCALENDAR", "Done with timer's async task");
-        }
-
-        // Implement the onChange(boolean, Uri) method to take advantage of the new Uri argument.
-        @Override
-        public synchronized void onChange(boolean selfChange, Uri uri) {
-            super.onChange(selfChange);
-            if (!selfChange) {
-                Log.v("MYCALENDAR", "Calendar changes; selfChange=" + selfChange + "; uri=" + uri + "; calendar=" + calendar);
-                if (scheduledTimer==null) {
-                    curTimeSecAtWaitStart=System.currentTimeMillis() / 1000L;
-                    Log.v("MYCALENDAR", "First notification of a change at "+secondsToDate(curTimeSecAtWaitStart)+"; will wait for "+CALENDAR_MAX_REFRESH_WAIT+" sec max");
-                }
-                else {
-                    clearTimer();
-                    if (((System.currentTimeMillis() / 1000L)-curTimeSecAtWaitStart)>=CALENDAR_MAX_REFRESH_WAIT) {
-                        Log.v("MYCALENDAR", "We waited more than "+CALENDAR_MAX_REFRESH_WAIT+" sec for changes to stop. Canceling timer and forcing a refresh");
-                        executeRefresh();
-                        return;
-                    }
-                }
-                scheduledTimer=new Timer();
-                Log.v("MYCALENDAR", "Scheduling timer for "+CALENDAR_REFRESH_DELAY+" sec");
-                scheduledTimer.schedule(new TimerTask() {
-                    @Override
-                    public void run() {
-                        Log.v("MYCALENDAR", "Timer run method is starting. About to execute async task");
-                        AsyncTask.execute(new Runnable() {
-                            @Override
-                            public void run() {
-                                clearTimer();
-                                executeRefresh();
-                            }
-                        });
-                    }
-                }, CALENDAR_REFRESH_DELAY*1000L);
-            }
-        }
-    }
-
     void setupObserver() {
         /*
             https://stackoverflow.com/questions/9440993/how-to-get-calendar-change-events-is-calendar-observer-working
@@ -535,12 +459,14 @@ public class MainActivity extends AppCompatActivity {
             });
         }
         */
+        /*
         AsyncTask.execute(new Runnable() {
             @Override
             public void run() {
-                getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+                getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false, observer); //true
             }
         });
+        */
 
         /*
         String[] projection = new String[] { "_id" };
@@ -590,7 +516,7 @@ public class MainActivity extends AppCompatActivity {
          */
     }
 
-    private void createNotificationChannel(String CHANNEL_ID) {
+    private static void createNotificationChannel(Context context,String CHANNEL_ID) {
         if (AgendaUpdateService.notificationChannel!=null) return;
         // Create the NotificationChannel, but only on API 26+ because
         // the NotificationChannel class is new and not in the support library
@@ -602,7 +528,7 @@ public class MainActivity extends AppCompatActivity {
             AgendaUpdateService.notificationChannel.setDescription(description);
             // Register the channel with the system; you can't change the importance
             // or other notification behaviors after this
-            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
             notificationManager.createNotificationChannel(AgendaUpdateService.notificationChannel);
         }
     }
@@ -674,8 +600,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    PendingIntent createActionIntent(int id,long eventId,String action) {
-        if (!NEW_INTENTS) setupBroadcastReceiver();
+    static PendingIntent createActionIntent(Context context,int id,long eventId,String action) {
+        //if (!NEW_INTENTS) setupBroadcastReceiver();
 
         Log.v("MYCALENDAR","creating intent with id="+id+" and event id="+eventId+" for action "+action);
 
@@ -691,7 +617,7 @@ public class MainActivity extends AppCompatActivity {
         return(actionPendingIntent);
     }
 
-    int generateNotificationId(long eventId) {
+    static int generateNotificationId(long eventId) {
         synchronized(AgendaUpdateService.notifiedEventIDs) {
             int firstEmpty = -1;
             for (int i = 0; i < AgendaUpdateService.notifiedEventIDs.size(); i++) {
@@ -719,15 +645,15 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    void createNotification(long eventId,String title,String descr) {
-        createNotificationChannel(NOTIFICATION_CHANNEL_ID);
+    static void createNotification(Context context,long eventId,String title,String descr) {
+        createNotificationChannel(context,NOTIFICATION_CHANNEL_ID);
 
         int id=generateNotificationId(eventId);
-        PendingIntent tapIntent=createActionIntent(id,eventId,ACTION_VIEW);
-        PendingIntent snoozePendingIntent=createActionIntent(id,eventId,ACTION_SNOOZE);
-        PendingIntent dismissPendingIntent=createActionIntent(id,eventId,ACTION_DISMISS);
+        PendingIntent tapIntent=createActionIntent(context,id,eventId,ACTION_VIEW);
+        PendingIntent snoozePendingIntent=createActionIntent(context,id,eventId,ACTION_SNOOZE);
+        PendingIntent dismissPendingIntent=createActionIntent(context,id,eventId,ACTION_DISMISS);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notes)
                 .setContentTitle(title)
                 .setContentText(descr)
@@ -746,16 +672,16 @@ public class MainActivity extends AppCompatActivity {
                 .setGroup(MY_NOTIFICATION_GROUP_ID)
                 // Set the intent that will fire when the user taps the notification
                 .setContentIntent(tapIntent)
-                .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, getString(R.string.snooze),
+                .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, context.getString(R.string.snooze),
                         snoozePendingIntent)
-                .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, getString(R.string.dismiss),
+                .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, context.getString(R.string.dismiss),
                         dismissPendingIntent)
                 .setOngoing(true) // prevent the user from swiping it away
 // Automatically remove the notification when the user clicks on it
 //                .setAutoCancel(true)
                 ;
 
-        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
 
         // id is a unique int for each notification that you must define
         notificationManager.notify(id, builder.build());
@@ -782,9 +708,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    void createSummaryNotification() {
+    public static Notification createSummaryNotification(Context appContext) {
+        return(createSummaryNotification(appContext, false));
+    }
+
+    public static Notification createSummaryNotification(Context appContext, boolean doDisplayNotification) {
         Notification summaryNotification =
-                new NotificationCompat.Builder(MainActivity.this, NOTIFICATION_CHANNEL_ID)
+                new NotificationCompat.Builder(appContext, NOTIFICATION_CHANNEL_ID)
                         .setContentTitle("Reminders")
                         //set content text to support devices running API level < 24
                         .setContentText("Reminders available")
@@ -811,15 +741,18 @@ public class MainActivity extends AppCompatActivity {
                         //set this notification as the summary for the group
                         .setGroupSummary(true)
                         .build();
-
-        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
-        notificationManager.notify(SUMMARY_NOTIFICATION_ID, summaryNotification);
+        if (doDisplayNotification) {
+            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
+            notificationManager.notify(SUMMARY_NOTIFICATION_ID, summaryNotification);
+        }
+        return(summaryNotification);
     }
 
-    void removeSummaryNotification() {
-        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
+    public static void removeSummaryNotification(Context appContext) {
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
         notificationManager.cancel(SUMMARY_NOTIFICATION_ID);
     }
+
     @Override
     public void onCreate(Bundle icicle) {
         super.onCreate(icicle);
@@ -832,21 +765,20 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        AsyncTask.execute(new Runnable() {
-            @Override
-            public void run() {
-                observer.clearTimer();
-                refreshList();
-            }
-        });
+//        AsyncTask.execute(new Runnable() {
+//            @Override
+//            public void run() {
+                AgendaUpdateService.observer.clearTimer();
+                refreshList(context);
+                refreshListInUI();
+//            }
+//        });
 
         setupObserver();
 
-        // TODO: restore this one once I have fixed the dismiss notification button
         // TODO: see if it's correct to call this one here. I don't think the widget does it
         updateTaskObservers();
-        Log.v("MYCALENDAR","Service val="+AgendaUpdateService.VAL);
-                
+
         // TODO: let's see if I can shut down the service that is stealing my broadcasts
         //Context context = AgendaWidgetApplication.getContext();
         //context.stopService(new Intent(context, AgendaUpdateService.class));
@@ -866,6 +798,7 @@ public class MainActivity extends AppCompatActivity {
                 if (++elapsedMin>=ExtendedCalendars.LOOKAHEAD_MINUTES) {
                     elapsedMin=0;
                     refreshList();
+                    refreshListInUI();
                 }
                 else {
                     refreshListCached();
@@ -884,8 +817,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     static boolean updateInProgress=false;
-    public void refreshList() {
-        synchronized(this) {
+    public static void refreshList(Context context) {
+        synchronized(MainActivity.class) {
             if (updateInProgress) {
                 Log.w("MYCALENDAR", "refreshList(): update already in progress; ignoring the additional refreshList request");
                 return;
@@ -904,7 +837,7 @@ public class MainActivity extends AppCompatActivity {
 
                 SpannableString spanDate = formatDate(context, calendarEvent, false); //new SpannableString(sb.toString());
                 SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
-                createNotification(calendarEvent.getId(), spanTitle.toString(), spanDate.toString());
+                createNotification(context,calendarEvent.getId(), spanTitle.toString(), spanDate.toString());
                 AgendaUpdateService.newNotifications.add(calendarEvent.getId());
             }
         }
@@ -915,13 +848,21 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         AgendaUpdateService.currentNotifications=new ArrayList<>(AgendaUpdateService.newNotifications);
-        if (AgendaUpdateService.currentNotifications.size()>1) {
-            createSummaryNotification();
-        }
-        else {
-            removeSummaryNotification();
+        if (!AgendaUpdateService.PERSISTENT_NOTIFICATION) {
+            if (AgendaUpdateService.currentNotifications.size()>1) {
+                createSummaryNotification(context,true);
+            }
+            else {
+                removeSummaryNotification(context);
+            }
         }
 
+        synchronized(MainActivity.class) {
+            updateInProgress = false;
+        }
+    }
+
+    public void refreshListInUI() {
         runOnUiThread(new Runnable() {
 
             @Override
@@ -934,9 +875,6 @@ public class MainActivity extends AppCompatActivity {
                 l.setAdapter(adapter);
             }
         });
-        synchronized(this) {
-            updateInProgress = false;
-        }
     }
 
     public void refreshListCached() {
@@ -970,8 +908,9 @@ public class MainActivity extends AppCompatActivity {
     public void runGetEvents(View view) {
         Log.w("MYCALENDAR","about to get events");
         //events = Events.getEvents(appWidgetId);
-        observer.clearTimer();
-        refreshList();
+        AgendaUpdateService.observer.clearTimer();
+        refreshList(context);
+        refreshListInUI();
         Log.w("MYCALENDAR","got events: "+AgendaUpdateService.events.size());
     }
 
@@ -990,16 +929,16 @@ public class MainActivity extends AppCompatActivity {
         context.sendBroadcast(widgetUpdateIntent);
     }
 
-
     public static class AgendaUpdateService extends Service {
-        // TODO: remove VAL, it's only to understand how the static block works
-        static int VAL=9999;
+        static boolean PERSISTENT_NOTIFICATION=true;
         private static final String ACTION_UPDATE = "gr.ictpro.jsalatas.agendawidget.action.UPDATE";
 
         private final static IntentFilter intentFilter;
         private static IntentFilter intentFilter2=null;
 
         private final static AgendaWidget.CalendarObserver calendarObserver = new AgendaWidget.CalendarObserver(new Handler());
+        private final static CalendarObserver observer = new CalendarObserver("", new Handler());
+
         private static AgendaWidget.TaskObserver[] taskObservers;
 
         static BroadcastReceiver br = null;
@@ -1034,6 +973,85 @@ public class MainActivity extends AppCompatActivity {
             updateTaskObservers();
         }
 
+        public static class CalendarObserver extends ContentObserver
+        {   String calendar;
+            CalendarObserver myself;
+            Timer scheduledTimer;
+            long curTimeSecAtWaitStart;
+
+            public CalendarObserver(String calendar,Handler handler) {
+                super(handler);
+                this.calendar=calendar;
+                this.myself=this;
+                this.scheduledTimer=null;
+                curTimeSecAtWaitStart=-1;
+            }
+
+            public boolean deliverSelfNotifications() {
+                return true;
+            }
+
+            @Override
+            public void onChange(boolean selfChange) {
+                onChange(selfChange, null);
+            }
+
+            public void clearTimer() {
+                Log.v("MYCALENDAR", "clearing any pending CalendarObserver timers");
+                if (scheduledTimer!=null) {
+                    scheduledTimer.cancel();
+                    scheduledTimer=null;
+                }
+            }
+
+            void executeRefresh() {
+                Log.v("MYCALENDAR", "Inside timer's async task");
+                //getContentResolver().unregisterContentObserver(myself);
+                Context context = AgendaWidgetApplication.getContext();
+                refreshList(context);
+                // TODO: send an intent to the main app's UI and tell it to refresh the UI
+                //refreshListInUI();
+                //getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, myself);
+                Log.v("MYCALENDAR", "Done with timer's async task");
+            }
+
+            // Implement the onChange(boolean, Uri) method to take advantage of the new Uri argument.
+            @Override
+            public synchronized void onChange(boolean selfChange, Uri uri) {
+                super.onChange(selfChange);
+                if (!selfChange) {
+                    Log.v("MYCALENDAR", "Calendar changes; selfChange=" + selfChange + "; uri=" + uri + "; calendar=" + calendar);
+                    if (scheduledTimer==null) {
+                        curTimeSecAtWaitStart=System.currentTimeMillis() / 1000L;
+                        Log.v("MYCALENDAR", "First notification of a change at "+secondsToDate(curTimeSecAtWaitStart)+"; will wait for "+CALENDAR_MAX_REFRESH_WAIT+" sec max");
+                    }
+                    else {
+                        clearTimer();
+                        if (((System.currentTimeMillis() / 1000L)-curTimeSecAtWaitStart)>=CALENDAR_MAX_REFRESH_WAIT) {
+                            Log.v("MYCALENDAR", "We waited more than "+CALENDAR_MAX_REFRESH_WAIT+" sec for changes to stop. Canceling timer and forcing a refresh");
+                            executeRefresh();
+                            return;
+                        }
+                    }
+                    scheduledTimer=new Timer();
+                    Log.v("MYCALENDAR", "Scheduling timer for "+CALENDAR_REFRESH_DELAY+" sec");
+                    scheduledTimer.schedule(new TimerTask() {
+                        @Override
+                        public void run() {
+                            Log.v("MYCALENDAR", "Timer run method is starting. About to execute async task");
+                            AsyncTask.execute(new Runnable() {
+                                @Override
+                                public void run() {
+                                    clearTimer();
+                                    executeRefresh();
+                                }
+                            });
+                        }
+                    }, CALENDAR_REFRESH_DELAY*1000L);
+                }
+            }
+        }
+
         private final BroadcastReceiver agendaChangedReceiver = new
                 BroadcastReceiver() {
                     @Override
@@ -1056,6 +1074,18 @@ public class MainActivity extends AppCompatActivity {
                     }
                 };
 
+        public static class StartMyServiceAtBootReceiver extends BroadcastReceiver {
+
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+//                    Intent serviceIntent = new Intent(context, MyService.class);
+//                    context.startService(serviceIntent);
+                    Log.v("MYCALENDAR","received BOOT_COMPLETED event");
+                    updateTaskObservers();
+                }
+            }
+        }
 
         private final BroadcastReceiver br2 = new
             BroadcastReceiver() {
@@ -1064,10 +1094,10 @@ public class MainActivity extends AppCompatActivity {
                     if (intent.getAction().equals(ACTION_DISMISS)) {
                         int id=intent.getIntExtra(EXTRA_NOTIFICATION_ID,-1);
                         if (id==-1) return;
-                        Log.v("MYCALENDAR","got dismiss for id="+id);
+                        Log.v("MYCALENDAR","br2: got dismiss for id="+id);
                         long eventId=intent.getLongExtra(EXTRA_EVENT_ID,-1);
                         if (eventId==-1) return;
-                        Log.v("MYCALENDAR","got dismiss for eventid="+eventId);
+                        Log.v("MYCALENDAR","br2: got dismiss for eventid="+eventId);
 
                         for(EventItem item : AgendaUpdateService.events) {
                             if (item instanceof ExtendedCalendarEvent) {
@@ -1087,7 +1117,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
                         // TODO: this should never happen
-                        Log.e("MYCALENDAR","Dismiss clicked for event with id="+eventId+", but no such id was found in events. Ignoring");
+                        Log.e("MYCALENDAR","br2: Dismiss clicked for event with id="+eventId+", but no such id was found in events. Ignoring");
                     }
                     else if (intent.getAction().equals(ACTION_VIEW)) {
                         //int id=intent.getIntExtra(EXTRA_NOTIFICATION_ID,-1);
@@ -1100,9 +1130,9 @@ public class MainActivity extends AppCompatActivity {
                         startActivity(viewIntent);
                     }
                     else {
-                        Log.v("MYCALENDAR","Received a broadcast!");
+                        Log.v("MYCALENDAR","br2: Received a broadcast!");
                         StringBuilder sb = new StringBuilder();
-                        sb.append("Action: " + intent.getAction() + "\n");
+                        sb.append("br2: Action: " + intent.getAction() + "\n");
                         sb.append("URI: " + intent.toUri(Intent.URI_INTENT_SCHEME).toString() + "\n");
                         sb.append("Extras:"+intent.getExtras());
                         String log = sb.toString();
@@ -1123,6 +1153,7 @@ public class MainActivity extends AppCompatActivity {
             for (AgendaWidget.TaskObserver taskObserver : taskObservers) {
                 getContentResolver().unregisterContentObserver(taskObserver);
             }
+            getContentResolver().unregisterContentObserver(observer);
             getContentResolver().unregisterContentObserver(calendarObserver);
             super.onDestroy();
         }
@@ -1148,6 +1179,8 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
+            getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+
             /*
             TEMPORARY ATTEMPT WITH PERMANENT BROADCASTRECEIVER
              */
@@ -1156,6 +1189,10 @@ public class MainActivity extends AppCompatActivity {
                 registerReceiver(br2, intentFilter2);
             }
             /*===*/
+            if (PERSISTENT_NOTIFICATION) {
+                Notification n=createSummaryNotification(this);
+                startForeground(SUMMARY_NOTIFICATION_ID,n);
+            }
             return START_STICKY;
         }
 

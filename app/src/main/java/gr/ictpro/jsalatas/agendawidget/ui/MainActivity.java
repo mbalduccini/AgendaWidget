@@ -768,9 +768,18 @@ public class MainActivity extends AppCompatActivity {
 //        AsyncTask.execute(new Runnable() {
 //            @Override
 //            public void run() {
+
                 AgendaUpdateService.observer.clearTimer();
-                refreshList(context);
-                refreshListInUI();
+        // all refreshList() calls moved to the service
+//                refreshList(context);
+//                refreshListInUI();
+                // TODO: this is primitive. We should receive a refresh-UI intent from the service instead
+                new Timer().scheduleAtFixedRate(new TimerTask() {
+                    @Override
+                    public void run() {
+                        refreshListInUI();
+                    }
+                }, 0, (60L*1000L)); // every 1 min
 //            }
 //        });
 
@@ -829,16 +838,33 @@ public class MainActivity extends AppCompatActivity {
         AgendaUpdateService.events = Events.getEvents(appWidgetId);
         Log.w("MYCALENDAR","got events: "+AgendaUpdateService.events.size()+"; triggered="+numTriggeredEvents());
 
+        synchronized(MainActivity.class) {
+            updateInProgress = false;
+        }
+
+        updateNotifications(context);
+    }
+    public static void updateNotifications(Context context) {
+        synchronized(MainActivity.class) {
+            if (updateInProgress) {
+                Log.w("MYCALENDAR", "updateNotifications(): update already in progress; ignoring the additional updateNotifications request");
+                return;
+            }
+            updateInProgress = true;
+        }
+
         // Create the notifications
         AgendaUpdateService.newNotifications=new ArrayList<>();
         for(EventItem event : AgendaUpdateService.events) {
-            if (event instanceof CalendarEvent) {
-                CalendarEvent calendarEvent = (CalendarEvent) event;
+            if (event instanceof ExtendedCalendarEvent) {
+                ExtendedCalendarEvent calendarEvent = (ExtendedCalendarEvent) event;
 
-                SpannableString spanDate = formatDate(context, calendarEvent, false); //new SpannableString(sb.toString());
-                SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
-                createNotification(context,calendarEvent.getId(), spanTitle.toString(), spanDate.toString());
-                AgendaUpdateService.newNotifications.add(calendarEvent.getId());
+                if (calendarEvent.isTriggered()) {
+                    SpannableString spanDate = formatDate(context, calendarEvent, false); //new SpannableString(sb.toString());
+                    SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
+                    createNotification(context, calendarEvent.getId(), spanTitle.toString(), spanDate.toString());
+                    AgendaUpdateService.newNotifications.add(calendarEvent.getId());
+                }
             }
         }
         // Remove all leftover notifications
@@ -880,6 +906,7 @@ public class MainActivity extends AppCompatActivity {
     public void refreshListCached() {
         Log.w("MYCALENDAR","got cached events: "+AgendaUpdateService.events.size()+"; triggered="+numTriggeredEvents());
 
+        updateNotifications(context);
         String[] vals=new String[numTriggeredEvents()];
         for(int i=0;i<vals.length;vals[i++]="");
 
@@ -1193,6 +1220,18 @@ public class MainActivity extends AppCompatActivity {
                 Notification n=createSummaryNotification(this);
                 startForeground(SUMMARY_NOTIFICATION_ID,n);
             }
+
+            Context context = this;//AgendaWidgetApplication.getContext();
+            refreshList(context);
+            // refresh the notifications at every minute
+            // TODO: to avoid waking up the service unnecessarily, it would be better to schedule the next notification update based on the event that will be triggered first
+            new Timer().scheduleAtFixedRate(new TimerTask() {
+                @Override
+                public void run() {
+                    updateNotifications(context);
+                }
+            }, 0, (60L*1000L)); // every 1 min
+
             return START_STICKY;
         }
 

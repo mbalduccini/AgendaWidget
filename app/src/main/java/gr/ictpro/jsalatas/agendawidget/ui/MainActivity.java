@@ -1264,7 +1264,9 @@ public class MainActivity extends AppCompatActivity {
             i++;
         }
 
-        context.startForegroundService(new Intent(context, AgendaUpdateService.class));
-        context.startService(new Intent(context, AgendaUpdateService.class));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            context.startForegroundService(new Intent(context, AgendaUpdateService.class));
+        else
+            context.startService(new Intent(context, AgendaUpdateService.class));
     }
 }

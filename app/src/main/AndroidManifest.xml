@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="org.dmfs.permission.READ_TASKS"/>
     <uses-permission android:name="org.tasks.READ"/>
     <uses-permission android:name="org.dayup.gtask.v2.permission.READ_TASKS"/>
@@ -87,6 +88,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+
+        <activity
+            android:name=".ui.MainActivity$SnoozeReminderActivity"
+            android:theme="@style/Theme.Transparent" />
+
     </application>
 
 </manifest>

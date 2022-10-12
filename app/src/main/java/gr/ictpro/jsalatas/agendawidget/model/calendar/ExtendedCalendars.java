@@ -43,6 +43,8 @@ import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
 import gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities;
 
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.EXTENDED_PROPERTIES_DEFAULT_NAMESPACE;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.addOrUpdateMultilinePropertyValue;
+import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.updateMultilinePropertyValue;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.deleteFromMultilinePropertyValue;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.getAbsoluteExtPropID;
 import static gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent.infinityDateMillis;
@@ -165,7 +167,294 @@ public class ExtendedCalendars extends Calendars {
         cr.update(builder.build(), content, null, null);
     }
 
+    public static void updateACKandAbsoluteSnooze(ExtendedCalendarEvent calendarEvent,String dtStr,long ackTimeSec,boolean removeAllAbsoluteReminders) {
+
+        String ext_selection;
+        String[] ext_projection;
+        Cursor cur;
+
+        // TODO: see if these are needed
+        //val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+        //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+
+        calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-LASTACK",dtStr);
+        // The following property is only for Google Calendars (not CalDAV). It will not be read back on other devices if we are using CalDAV
+        calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
+
+        // DIFF: the block below is basically the same, since it's on ACK
+        //       NOTE: it is on ACKs and also removes obsolete absolute SNOOZEs
+        // INPUT: notifTSMillis << but in the snooze code they are used as if they were SECONDS!!!!!!!!!
+        //        aka ackTimeSec
+        // INPUT: (bool) removeAllAbsoluteReminders: check notifTSMillis to determine obsolete absolute reminders
+        Log.v("MYCALENDAR", "in updateACKandAbsoluteSnooze(): before storing ACK-C");
+
+        ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+        Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+        for (ExtendedCalendarEvent.Reminder r : calendarEvent.getReminders()) {
+//            int type = (r.type == CalendarContract.Reminders.METHOD_EMAIL)? ExtendedCalendarEvent.Reminder.REMINDER_EMAIL : ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION;
+            int method=(r.type == ExtendedCalendarEvent.Reminder.REMINDER_EMAIL) ? CalendarContract.Reminders.METHOD_EMAIL : CalendarContract.Reminders.METHOD_ALERT;
+
+            long absolute_extprop_id=getAbsoluteExtPropID(calendarEvent.getId(), method, r.minutes);
+            boolean is_absolute=(absolute_extprop_id!=-1L);
+            if (is_absolute  && (removeAllAbsoluteReminders || (dateToSeconds(calendarEvent.getStartDate()) - r.minutes * 60) <= ackTimeSec)) {
+                String selection = CalendarContract.Reminders.EVENT_ID + " = "+calendarEvent.getId()+" AND "+ CalendarContract.Reminders.METHOD+" = "+method+" AND "+ CalendarContract.Reminders.MINUTES+" = "+r.minutes;
+                cr.delete(CalendarContract.Reminders.CONTENT_URI, selection, null);
+                Log.v("MYCALENDAR", "in updateACKandAbsoluteSnooze(): done with is_absolute branch");
+            }
+            else {
+                Log.v("MYCALENDAR", "in updateACKandAbsoluteSnooze(): in !is_absolute branch");
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                ext_projection = new String[]{
+                        CalendarContract.ExtendedProperties._ID,
+                        CalendarContract.ExtendedProperties.VALUE,
+                };
+                String ACK_SEP = ";";
+                String pname1 = "X-CALDAV-ANDROID-ACK";
+                String pname2 = "X-CALDAV-ANDROID-MOZACK";
+                String prefix1 = "[\"" + pname1 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP;
+                String prefix2 = "[\"" + pname2 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP;
+                boolean prefix1_found=false;
+                boolean prefix2_found=false;
+                Date startTS = calendarEvent.getStartDate();
+                long notifTS2=((long)ackTimeSec)*1000L;
+
+                cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                while (cur.moveToNext()) {
+                    long ext_prop_id = cur.getLong(0);
+                    String v = cur.getString(1);
+                    Log.v("MYCALENDAR", "got reminder ext-prop; id=" + ext_prop_id + "; value=" + v);
+
+                    Log.v("MYCALENDAR", "checking startsWith of " + pname1 + " or " + pname2);
+                    int res = 0;   // 0=not found; 1=ACK; 2=MOZACK
+                    String prefix = "";
+                    String pname = "";
+                    if (v.startsWith(prefix1)) {
+                        res = 1;
+                        prefix = prefix1;
+                        pname = pname1;
+                        prefix1_found=true;
+                    } else if (v.startsWith(prefix2)) {
+                        res = 2;
+                        prefix = prefix2;
+                        pname = pname2;
+                        prefix2_found=true;
+                    }
+                    if (res != 0) {
+                        long t = Long.parseLong(v.substring(prefix.length(), v.length() - 2)) / 1000L;
+                        Log.v("MYCALENDAR", "it's a match for method+minutes!! remaining data=" + t);
+
+                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): ack<startTS+remind: changing ack to +inf for time " + (dateToSeconds(startTS) - r.minutes * 60));
+
+                        calendarEvent.updateExtendedProperty(
+                                ext_prop_id,
+                                "[\"" + pname + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + notifTS2 + "\"]");
+                    }
+                }
+                cur.close();
+
+                if (!prefix1_found) {
+                    calendarEvent.addExtendedProperty(
+                            EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                            "[\"" + pname1 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + notifTS2 + "\"]");
+                }
+                if (!prefix2_found) {
+                    calendarEvent.addExtendedProperty(
+                            EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                            "[\"" + pname2 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + notifTS2 + "\"]");
+                }
+            }
+        }
+    }
+
     public static void dismissCalDAVEventReminders(EventItem event) {
+
+        String ext_selection;
+        String[] ext_projection;
+        Cursor cur;
+
+        if (event instanceof ExtendedCalendarEvent && !(event instanceof TaskEvent)) {
+            ExtendedCalendarEvent calendarEvent = (ExtendedCalendarEvent) event;
+
+            // TODO: see if these are needed
+            //val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+            //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+
+            markEventDirty(calendarEvent);
+
+            long curTimeSec=System.currentTimeMillis() / 1000L;
+
+            boolean is_repeat=(calendarEvent.getRrule()!=null);
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): setting properties for event "+calendarEvent.getTitle()+"; (is_repeat="+is_repeat+")");
+
+            String dtStr=infinityDateStr;
+            long ackTimeSec=infinityDateSeconds;
+            if (is_repeat) {
+                ackTimeSec=max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1;
+                dtStr=ISO8601Utilities.formatDateTimeCompact(secondsToDate(ackTimeSec));
+            }
+
+            updateACKandAbsoluteSnooze(calendarEvent,dtStr,ackTimeSec,false);
+
+            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
+            ext_projection = new String[]{
+                    CalendarContract.ExtendedProperties._ID,
+                    CalendarContract.ExtendedProperties.VALUE,
+            };
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+            ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+            Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+            while (cur.moveToNext()) {
+                String v = cur.getString(1);
+                String v2=deleteFromMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME");
+                if (!v.equals(v2)) {
+                    if (!v2.equals("")) {
+                        calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed from private:http://emclient.com/ns/#calendar");
+                    }
+                    else {
+                        calendarEvent.deleteExtendedProperty(cur.getLong(0));
+                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed (full private:http://emclient.com/ns/#calendar property removed)");
+                    }
+                }
+            }
+            cur.close();
+            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): done setting properties for calendarEvent with title "+ calendarEvent.getTitle());
+
+            // Remove X-MOZ-SNOOZE-TIME if present
+            calendarEvent.deleteExtendedPropertyJSonEncoded("X-MOZ-SNOOZE-TIME", null);
+            Log.v("MYCALENDAR", "X-MOZ-SNOOZE-TIME deleted if it exists");
+
+            // TODO: figure out WHEN I should call this. For sure, I can't call it right away, because the Davx5 property are the way I communicate the info to DavX5 for sending to the calendar provider!!
+            //calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();  // remove davx5 properties if this is a Google Calendar
+
+            // TODO: cause the reminder listview to be refreshed
+        }
+    }
+
+    public static void snoozeCalDAVEventReminders(EventItem event, long snoozeMinutes) {
+
+        String ext_selection;
+        String[] ext_projection;
+        Cursor cur;
+
+        boolean TEST_ONLY=false;//true;
+
+        if (event instanceof ExtendedCalendarEvent && !(event instanceof TaskEvent)) {
+            ExtendedCalendarEvent calendarEvent = (ExtendedCalendarEvent) event;
+
+            // TODO: see if these are needed
+            //val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+            //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+
+
+            if (!TEST_ONLY)
+            markEventDirty(calendarEvent);
+
+
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting properties for Google Calendar");
+
+            // DIFF: the block below is basically the same, because it's another one on ACK
+            long curr_time = System.currentTimeMillis(); // this *is* supposed to be in millis
+            String dtStr=ISO8601Utilities.formatDateTimeCompact(millisToDate(System.currentTimeMillis()));
+            long notifTSMillis = System.currentTimeMillis()+(snoozeMinutes*60000L);
+            // TODO: figure out if I need this block
+            /*
+        // Generation of X-MOZ-SNOOZE-TIME
+        val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+        dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+        //val strDate = dateFormat.format(Date())
+        val strDate = dateFormat.format(curr_time)
+             */
+
+            updateACKandAbsoluteSnooze(calendarEvent,dtStr,curr_time / 1000L,true);
+
+            // DIFF: the block below is fairly different, because it's about SNOOZE
+            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
+            ext_projection = new String[]{
+                    CalendarContract.ExtendedProperties._ID,
+                    CalendarContract.ExtendedProperties.VALUE,
+            };
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+            ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+            Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+            boolean emclient_moz_snooze_found=false;
+            long emcli_prop_id=-1L;
+            String emcli_prop_val="";
+            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+            while (cur.moveToNext()) {
+                String v = cur.getString(1);
+                emcli_prop_id=cur.getLong(0);
+                emcli_prop_val=v;
+                String v2=updateMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis))); //dateFormat.format(notifTS))
+                if (!v.equals(v2)) {
+                    Log.v("MYCALENDAR","found that v!=v2 where they are "+v+"; "+v2);
+                    if (!TEST_ONLY)
+                    calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                    emclient_moz_snooze_found = true;
+                }
+            }
+            cur.close();
+            if (!emclient_moz_snooze_found) {
+                if (emcli_prop_id!=-1L) {
+                    // [MB] implementing addMultilinePropertyValue() would do, but I prefer to play it safe in case earlier code missed that it is there
+                    String v=addOrUpdateMultilinePropertyValue(emcli_prop_val, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                    if (!TEST_ONLY)
+                    calendarEvent.updateExtendedProperty(emcli_prop_id, v);
+                }
+                else {
+                    if (!TEST_ONLY)
+                    calendarEvent.addExtendedProperty(
+                            "private:http://emclient.com/ns/#calendar",
+                            "X-MOZ-SNOOZE-TIME:" + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                }
+            }
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): emclient's X-MOZ-SNOOZE-TIME added or updated to: " + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): done setting some test properties for Google Calendar, for calendarEvent with title "+ calendarEvent.getTitle());
+
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting X-MOZ-SNOOZE-TIME to " + dtStr);
+            if (!TEST_ONLY)
+            calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-SNOOZE-TIME", dtStr);
+
+            // Create an absolute reminder for this snooze (recall that all past absolute reminders have been removed)
+            long newMinutes=(dateToSeconds(calendarEvent.getStartDate())/60)-(notifTSMillis/60000L); // BUG HERE: everywhere else it is seconds
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): adding reminder trigger for " + newMinutes);
+            ContentValues content = new ContentValues();
+            content.put(CalendarContract.Reminders.EVENT_ID, calendarEvent.getId());
+            content.put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT);
+            content.put(CalendarContract.Reminders.MINUTES, newMinutes);
+            if (!TEST_ONLY)
+            cr.insert(CalendarContract.Reminders.CONTENT_URI, content);
+
+            Log.v("MINE", "in snoozeCalDAVEventReminders(): added reminder trigger for " + newMinutes);
+
+            // Create acks for the absolute reminder we just created
+            String ACK_SEP = ";";
+            String pname1 = "X-CALDAV-ANDROID-ACK";
+            String pname2 = "X-CALDAV-ANDROID-MOZACK";
+            if (!TEST_ONLY)
+            calendarEvent.addExtendedProperty(
+                    EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                    "[\"" + pname1 + "\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + ACK_SEP + curr_time/*notifTS*/ + "\"]");
+            if (!TEST_ONLY)
+            calendarEvent.addExtendedProperty(
+                    EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                    "[\"" + pname2 + "\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + ACK_SEP + curr_time/*notifTS*/ + "\"]");
+            if (!TEST_ONLY)
+            calendarEvent.addExtendedProperty(
+                    EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                    "[\"X-CALDAV-ANDROID-ABSOLUTE\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + "\"]");
+
+            // TODO: figure out WHEN I should call this. For sure, I can't call it right away, because the Davx5 property are the way I communicate the info to DavX5 for sending to the calendar provider!!
+            //calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();  // remove davx5 properties if this is a Google Calendar
+
+            // TODO: cause the reminder listview to be refreshed
+        }
+    }
+
+    public static void dismissCalDAVEventReminders_OLD(EventItem event) {
 
         String ext_selection;
         String[] ext_projection;
@@ -303,6 +592,229 @@ public class ExtendedCalendars extends Calendars {
                     }
                 }
             }
+
+            // TODO: figure out WHEN I should call this. For sure, I can't call it right away, because the Davx5 property are the way I communicate the info to DavX5 for sending to the calendar provider!!
+            //calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();  // remove davx5 properties if this is a Google Calendar
+
+            // TODO: cause the reminder listview to be refreshed
+        }
+    }
+
+    public static void snoozeCalDAVEventReminders_OLD(EventItem event, long notifTSMillis/*NOTE that this was already in millis even in the orig. version*/) {
+
+        String ext_selection;
+        String[] ext_projection;
+        Cursor cur;
+
+        boolean TEST_ONLY=true;
+
+        if (event instanceof ExtendedCalendarEvent && !(event instanceof TaskEvent)) {
+            ExtendedCalendarEvent calendarEvent = (ExtendedCalendarEvent) event;
+
+            // TODO: see if these are needed
+            //val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+            //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+
+
+            if (!TEST_ONLY)
+                markEventDirty(calendarEvent);
+
+
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting properties for Google Calendar");
+
+            // DIFF: the block below is basically the same, because it's another one on ACK
+            long snooze_time = System.currentTimeMillis(); // this *is* supposed to be in millis
+            String dtStr=ISO8601Utilities.formatDateTimeCompact(millisToDate(System.currentTimeMillis()));
+            // TODO: figure out if I need this block
+            /*
+        // Generation of X-MOZ-SNOOZE-TIME
+        val dateFormat: DateFormat = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'")
+        dateFormat.timeZone=TimeZone.getTimeZone("UTC")
+        //val strDate = dateFormat.format(Date())
+        val strDate = dateFormat.format(snooze_time)
+             */
+
+            if (!TEST_ONLY)
+                calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-LASTACK",dtStr);
+            // The following property is only for Google Calendars (not CalDAV). It will not be read back on other devices if we are using CalDAV
+            if (!TEST_ONLY)
+                calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
+
+            // DIFF: the block below is fairly different, because it's about SNOOZE
+            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
+            ext_projection = new String[]{
+                    CalendarContract.ExtendedProperties._ID,
+                    CalendarContract.ExtendedProperties.VALUE,
+            };
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+            ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+            Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+            boolean emclient_moz_snooze_found=false;
+            long emcli_prop_id=-1L;
+            String emcli_prop_val="";
+            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+            while (cur.moveToNext()) {
+                String v = cur.getString(1);
+                emcli_prop_id=cur.getLong(0);
+                emcli_prop_val=v;
+                String v2=updateMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis))); //dateFormat.format(notifTS))
+                if (!v.equals(v2)) {
+                    Log.v("MYCALENDAR","found that v!=v2 where they are "+v+"; "+v2);
+                    if (!TEST_ONLY)
+                        calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                    emclient_moz_snooze_found = true;
+                }
+            }
+            cur.close();
+            if (!emclient_moz_snooze_found) {
+                if (emcli_prop_id!=-1L) {
+                    // [MB] implementing addMultilinePropertyValue() would do, but I prefer to play it safe in case earlier code missed that it is there
+                    String v=addOrUpdateMultilinePropertyValue(emcli_prop_val, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                    if (!TEST_ONLY)
+                        calendarEvent.updateExtendedProperty(emcli_prop_id, v);
+                }
+                else {
+                    if (!TEST_ONLY)
+                        calendarEvent.addExtendedProperty(
+                                "private:http://emclient.com/ns/#calendar",
+                                "X-MOZ-SNOOZE-TIME:" + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                }
+            }
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): emclient's X-MOZ-SNOOZE-TIME added or updated to: " + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): done setting some test properties for Google Calendar, for calendarEvent with title "+ calendarEvent.getTitle());
+
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting X-MOZ-SNOOZE-TIME to " + dtStr);
+            if (!TEST_ONLY)
+                calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-SNOOZE-TIME", dtStr);
+
+            // DIFF: the block below is basically the same, since it's on ACK
+            //       NOTE: it is on ACKs and also removes obsolete absolute SNOOZEs
+            // INPUT: notifTSMillis << but in the snooze code they are used as if they were SECONDS!!!!!!!!!
+            // INPUT: (bool) check notifTSMillis to determine obsolete absolute reminders
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): before storing ACK-C");
+            String ACK_SEP = ";";
+            String pname1 = "X-CALDAV-ANDROID-ACK";
+            String pname2 = "X-CALDAV-ANDROID-MOZACK";
+            // Assumptions
+            //   * There exists always at least one relative (i.e., non-absolute) reminder
+            // DIFF: dismiss also sets variable "type", but it is not used
+            for (ExtendedCalendarEvent.Reminder r : calendarEvent.getReminders()) {
+                int method = (r.type == ExtendedCalendarEvent.Reminder.REMINDER_EMAIL) ? CalendarContract.Reminders.METHOD_EMAIL : CalendarContract.Reminders.METHOD_ALERT;
+
+                long absolute_extprop_id=getAbsoluteExtPropID(calendarEvent.getId(), method, r.minutes);
+                boolean is_absolute=(absolute_extprop_id!=-1L);
+
+                Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(" + calendarEvent.getTitle() + "): is_absolute=" + is_absolute + "; notifTSMillis=" + notifTSMillis + "; calc-start=" + (dateToSeconds(calendarEvent.getStartDate()) - r.minutes * 60) + "; will remove?" + (is_absolute && ((dateToSeconds(calendarEvent.getStartDate()) - r.minutes * 60) <= notifTSMillis)));
+
+// DIFF: && ...: only for snooze
+// BIG PROBLEM: in snooze, we say that we use Millis, but the calculated time is in SECONDS
+// I think the extra stuff for snooze is due to the fact that here we are deleting reminders, which is orthogonal to working on ACKs
+                if (is_absolute && (dateToSeconds(calendarEvent.getStartDate()) - r.minutes * 60) <= notifTSMillis) {
+                    // absolute reminder made obsolete by the ack: remove it
+                    String selection = CalendarContract.Reminders.EVENT_ID + " = "+calendarEvent.getId()+" AND "+ CalendarContract.Reminders.METHOD+" = "+method+" AND "+ CalendarContract.Reminders.MINUTES+" = "+r.minutes;
+                    if (!TEST_ONLY)
+                        cr.delete(CalendarContract.Reminders.CONTENT_URI, selection, null);
+                    continue;
+                }
+
+                // DIFF: dismiss has an else branch, but if I understand correctly, it's the same as what we are simulating here with "continue" ^^^^^^
+                // However, watch for the effect of the &&... in the "if" of the previous block
+
+                // For all other reminders (either relative or absolute but still running)
+                // update the properties
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                ext_projection = new String[]{
+                        CalendarContract.ExtendedProperties._ID,
+                        CalendarContract.ExtendedProperties.VALUE,
+                };
+                String prefix1 = "[\"" + pname1 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP;
+                String prefix2 = "[\"" + pname2 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP;
+                boolean prefix1_found=false;
+                boolean prefix2_found=false;
+
+// DIFF: dismiss has these two statements, but I think they need to be inputs to the generalized method
+//       Also note that startTS is used only in a Log statement in dismiss
+//                Date startTS = calendarEvent.getStartDate();
+//                long notifTS2=((long)ackTimeSec)*1000L;
+
+                cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                while (cur.moveToNext()) {
+                    long ext_prop_id = cur.getLong(0);
+                    String v = cur.getString(1);
+
+                    Log.v("MYCALENDAR", "got reminder ext-prop; id=" + ext_prop_id + "; value=" + v);
+                    Log.v("MYCALENDAR", "checking startsWith of " + pname1 + " or " + pname2);
+                    int res = 0;   // 0=not found; 1=ACK; 2=MOZACK
+                    String prefix = "";
+                    String pname = "";
+                    if (v.startsWith(prefix1)) {
+                        res = 1;
+                        prefix = prefix1;
+                        pname = pname1;
+                        prefix1_found=true;
+                    } else if (v.startsWith(prefix2)) {
+                        res = 2;
+                        prefix = prefix2;
+                        pname = pname2;
+                        prefix2_found=true;
+                    }
+                    if (res != 0) {
+                        Log.v("MINE", "in snoozeCalDAVEventReminders(): updating ack on " + prefix + " to " + snooze_time);
+
+                        if (!TEST_ONLY)
+                            calendarEvent.updateExtendedProperty(
+                                    ext_prop_id,
+// DIFF: dismiss uses notifTS2, but again I think snooze_time/notifTS2 must be a parameter to the generalized method
+                                    "[\"" + pname + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + snooze_time + "\"]");
+                    }
+                }
+                cur.close();
+
+                if (!prefix1_found) {
+                    if (!TEST_ONLY)
+                        calendarEvent.addExtendedProperty(
+                                EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+// DIFF: dismiss uses notifTS2, but again I think snooze_time/notifTS2 must be a parameter to the generalized method
+                                "[\"" + pname1 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + snooze_time + "\"]");
+                }
+                if (!prefix2_found) {
+                    if (!TEST_ONLY)
+                        calendarEvent.addExtendedProperty(
+                                EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+// DIFF: dismiss uses notifTS2, but again I think snooze_time/notifTS2 must be a parameter to the generalized method
+                                "[\"" + pname2 + "\",\"" + method + ACK_SEP + r.minutes + ACK_SEP + snooze_time + "\"]");
+                }
+
+
+            }
+
+// DIFF: dismiss ends here
+            // Create an absolute reminder for this snooze (recall that all past absolute reminders have been removed)
+            long newMinutes=(dateToSeconds(calendarEvent.getStartDate())/60)-(notifTSMillis/60000);
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): adding reminder trigger for " + newMinutes);
+            ContentValues content = new ContentValues();
+            content.put(CalendarContract.Reminders.EVENT_ID, calendarEvent.getId());
+            content.put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT);
+            content.put(CalendarContract.Reminders.MINUTES, newMinutes);
+            if (!TEST_ONLY)
+                cr.insert(CalendarContract.Reminders.CONTENT_URI, content);
+
+            Log.v("MINE", "in snoozeCalDAVEventReminders(): added reminder trigger for " + newMinutes);
+
+            // Create acks for the absolute reminder we just created
+            if (!TEST_ONLY)
+                calendarEvent.addExtendedProperty(
+                        EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                        "[\"" + pname1 + "\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + ACK_SEP + snooze_time/*notifTS*/ + "\"]");
+            if (!TEST_ONLY)
+                calendarEvent.addExtendedProperty(
+                        EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                        "[\"" + pname2 + "\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + ACK_SEP + snooze_time/*notifTS*/ + "\"]");
+            if (!TEST_ONLY)
+                calendarEvent.addExtendedProperty(
+                        EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
+                        "[\"X-CALDAV-ANDROID-ABSOLUTE\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + "\"]");
 
             // TODO: figure out WHEN I should call this. For sure, I can't call it right away, because the Davx5 property are the way I communicate the info to DavX5 for sending to the calendar provider!!
             //calendarEvent.deleteDavx5PropertiesFromGoogleCalendar();  // remove davx5 properties if this is a Google Calendar

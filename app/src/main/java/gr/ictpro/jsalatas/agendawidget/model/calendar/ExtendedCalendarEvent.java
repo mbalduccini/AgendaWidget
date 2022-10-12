@@ -36,32 +36,32 @@ public class ExtendedCalendarEvent extends CalendarEvent {
     //finel static String EXTENDED_PROPERTIES_DEFAULT_NAMESPACE = "vnd.android.cursor.item/vnd.ical4android.unknown-property";
     public static final String EXTENDED_PROPERTIES_DEFAULT_NAMESPACE = "vnd.android.cursor.item/vnd.i4a.unkp";   // [MB] shortened due to limitations of Google Calendar provider
 
-    final static String infinityDateStr="99991231T235859Z";
-    final static long infinityDateMillis=253402300739000L;
-    final static long infinityDateSeconds=253402300739L;
+    final static String infinityDateStr = "99991231T235859Z";
+    final static long infinityDateMillis = 253402300739000L;
+    final static long infinityDateSeconds = 253402300739L;
 
 
     // absoluteTS==-1L means reminder is relative;
     // if absoluteTS!=-1L, then minutes should be disregarded when scheduling the notifications
     public static class Reminder {
-        public final static int REMINDER_NOTIFICATION=0;
-        public final static int REMINDER_EMAIL=1;
+        public final static int REMINDER_NOTIFICATION = 0;
+        public final static int REMINDER_EMAIL = 1;
 
         int minutes;
         int type;
-        long ack=-1L;
-        long absoluteTS=-1L;
+        long ack = -1L;
+        long absoluteTS = -1L;
 
-        public Reminder(int minutes,int type) {
-            this.minutes=minutes;
-            this.type=type;
+        public Reminder(int minutes, int type) {
+            this.minutes = minutes;
+            this.type = type;
         }
 
-        public Reminder(int minutes,int type,long ack, long absoluteTS) {
-            this.minutes=minutes;
-            this.type=type;
-            this.ack=ack;
-            this.absoluteTS=absoluteTS;
+        public Reminder(int minutes, int type, long ack, long absoluteTS) {
+            this.minutes = minutes;
+            this.type = type;
+            this.ack = ack;
+            this.absoluteTS = absoluteTS;
         }
     }
 
@@ -71,38 +71,40 @@ public class ExtendedCalendarEvent extends CalendarEvent {
     private final List<Reminder> reminders;
     private final Date trigger;
 
-    protected ExtendedCalendarEvent(long id, int color, String title, String location, String description, Date startDate, Date endDate, boolean allDay, int calendarId, String rrule,List<Reminder> reminders, Date trigger) {
+    protected ExtendedCalendarEvent(long id, int color, String title, String location, String description, Date startDate, Date endDate, boolean allDay, int calendarId, String rrule, List<Reminder> reminders, Date trigger) {
         super(id, color, title, location, description, startDate, endDate, allDay);
-        this.calendarId=calendarId;
-        this.rrule=rrule;
-        this.reminders=reminders;
-        this.trigger=trigger;
+        this.calendarId = calendarId;
+        this.rrule = rrule;
+        this.reminders = reminders;
+        this.trigger = trigger;
     }
 
     public int getCalendarId() {
-        return(calendarId);
+        return (calendarId);
     }
 
     public String getRrule() {
-        return(rrule);
+        return (rrule);
     }
 
     public List<Reminder> getReminders() {
-        return(reminders);
+        return (reminders);
     }
 
-    public Date getTrigger() { return(trigger); }
+    public Date getTrigger() {
+        return (trigger);
+    }
 
     public boolean isTriggered() {
         Date now = GregorianCalendar.getInstance().getTime();
-        return(now.compareTo(getTrigger())>=0);
+        return (now.compareTo(getTrigger()) >= 0);
     }
 
 
     public void dumpExtendedPropertiesForEvent() {
         Log.v("MYCALENDAR", "Cached reminders for event titled " + getTitle());
-        for(Reminder r:getReminders()) {
-            Log.v("MYCALENDAR", "minutes="+r.minutes+"; type="+r.type+"; ack="+r.ack+"; absoluteTS="+r.absoluteTS);
+        for (Reminder r : getReminders()) {
+            Log.v("MYCALENDAR", "minutes=" + r.minutes + "; type=" + r.type + "; ack=" + r.ack + "; absoluteTS=" + r.absoluteTS);
         }
         Log.v("MYCALENDAR", "============================");
 
@@ -113,7 +115,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
                 CalendarContract.Reminders.MINUTES,
                 CalendarContract.Reminders.METHOD
         };
-        String selection=CalendarContract.Reminders.EVENT_ID+" = "+getId();
+        String selection = CalendarContract.Reminders.EVENT_ID + " = " + getId();
 
         Cursor cur = cr.query(builder.build(), PROJECTION_reminders, selection, null, null);
         Log.v("MYCALENDAR", "Low-level reminders for event titled " + getTitle());
@@ -139,7 +141,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
             long id = cur.getLong(0);
             String n = cur.getString(1);
             String v = cur.getString(2);
-            Log.v("MYCALENDAR", "id="+id+"; name="+n+"; value="+v);
+            Log.v("MYCALENDAR", "id=" + id + "; name=" + n + "; value=" + v);
         }
         cur.close();
         Log.v("MYCALENDAR", "============================");
@@ -151,19 +153,20 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         return (permissionCheck1 != PackageManager.PERMISSION_DENIED) && (permissionCheck2 != PackageManager.PERMISSION_DENIED);
     }
 
+    // TODO: remove this function when we are done running tests
     public void runTests() {
         if (!checkPermissions()) {
             return;
         }
 
         // enable run5+run6 to remove the ack from a Test event
-        boolean run1=false;
-        boolean run2=false;
-        boolean run3=false;
-        boolean run4=false;
-        boolean run5=true;
-        boolean run6=true;
-        boolean run7=false;
+        boolean run1 = false;
+        boolean run2 = false;
+        boolean run3 = false;
+        boolean run4 = false;
+        boolean run5 = true;
+        boolean run6 = true;
+        boolean run7 = false;
 
         if (run1) {
             long curTimeSec = System.currentTimeMillis() / 1000L;
@@ -180,38 +183,34 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         }
 
         if (run2) {
-            String s="a:1\r\nb:2\r\nc:3\r\nd:4\r\n";
+            String s = "a:1\r\nb:2\r\nc:3\r\nd:4\r\n";
 
-            String t="b:2\r\nc:3\r\nd:4";
+            String t = "b:2\r\nc:3\r\nd:4";
             String r;
-            if ((r=deleteFromMultilinePropertyValue(s, "a")).equals(t)) {
+            if ((r = deleteFromMultilinePropertyValue(s, "a")).equals(t)) {
                 Log.v("MYCALENDAR", "Test 1 PASSED");
-            }
-            else {
-                Log.v("MYCALENDAR", "Test 1 FAILED. Returned: "+r+"; expected: "+t);
+            } else {
+                Log.v("MYCALENDAR", "Test 1 FAILED. Returned: " + r + "; expected: " + t);
             }
 
-            t="a:1\r\nc:3\r\nd:4";
-            if ((r=deleteFromMultilinePropertyValue(s, "b")).equals(t)) {
+            t = "a:1\r\nc:3\r\nd:4";
+            if ((r = deleteFromMultilinePropertyValue(s, "b")).equals(t)) {
                 Log.v("MYCALENDAR", "Test 2 PASSED");
-            }
-            else {
-                Log.v("MYCALENDAR", "Test 2 FAILED. Returned: "+r+"; expected: "+t);
+            } else {
+                Log.v("MYCALENDAR", "Test 2 FAILED. Returned: " + r + "; expected: " + t);
             }
 
-            t="a:1\r\nb:2\r\nc:3";
-            if ((r=deleteFromMultilinePropertyValue(s, "d")).equals(t)) {
+            t = "a:1\r\nb:2\r\nc:3";
+            if ((r = deleteFromMultilinePropertyValue(s, "d")).equals(t)) {
                 Log.v("MYCALENDAR", "Test 3 PASSED");
-            }
-            else {
-                Log.v("MYCALENDAR", "Test 3 FAILED. Returned: "+r+"; expected: "+t);
+            } else {
+                Log.v("MYCALENDAR", "Test 3 FAILED. Returned: " + r + "; expected: " + t);
             }
 
-            if ((r=deleteFromMultilinePropertyValue(s, "z")).equals(s)) {
+            if ((r = deleteFromMultilinePropertyValue(s, "z")).equals(s)) {
                 Log.v("MYCALENDAR", "Test 4 PASSED");
-            }
-            else {
-                Log.v("MYCALENDAR", "Test 4 FAILED. Returned: "+r+"; expected: "+s);
+            } else {
+                Log.v("MYCALENDAR", "Test 4 FAILED. Returned: " + r + "; expected: " + s);
             }
         }
 
@@ -223,13 +222,13 @@ public class ExtendedCalendarEvent extends CalendarEvent {
 
         if (run4) {
             Log.v("MYCALENDAR", "update private:X-MOZ-LASTACK to 123");
-            addOrUpdateExtendedProperty("private:X-MOZ-LASTACK","123");
+            addOrUpdateExtendedProperty("private:X-MOZ-LASTACK", "123");
             Log.v("MYCALENDAR", "done with update private:X-MOZ-LASTACK to 123. Run dump to check that it's updated");
         }
 
         if (run5) {
             Log.v("MYCALENDAR", "update private:X-MOZ-LASTACK to 123");
-            long id=findExtendedProperty("private:X-MOZ-LASTACK",null);
+            long id = findExtendedProperty("private:X-MOZ-LASTACK", null);
             deleteExtendedProperty(id);
             Log.v("MYCALENDAR", "done with update private:X-MOZ-LASTACK to 123. Run dump to check that it's updated");
         }
@@ -237,18 +236,18 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         if (run6) {
             Log.v("MYCALENDAR", "run deleteDavx5PropertiesFromGoogleCalendar()");
             deleteDavx5PropertiesFromGoogleCalendar();
-            Log.v("MYCALENDAR", "done with deleteDavx5PropertiesFromGoogleCalendar. Run dump to check that it has no properties with name "+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE);
+            Log.v("MYCALENDAR", "done with deleteDavx5PropertiesFromGoogleCalendar. Run dump to check that it has no properties with name " + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE);
         }
 
         if (run7) {
             //secondsToDate(max(dateToSeconds(calendarEvent.getEndDate()), curTimeSec) + 1)
-            Date dt=new Date();
-            Log.v("MYCALENDAR", "full/compact date formatting test. Date="+dt);
+            Date dt = new Date();
+            Log.v("MYCALENDAR", "full/compact date formatting test. Date=" + dt);
             String dtStr;
-            dtStr=ISO8601Utilities.formatDateTime(dt);
-            Log.v("MYCALENDAR", "full date formatting test returned "+dtStr);
-            dtStr=ISO8601Utilities.formatDateTimeCompact(dt);
-            Log.v("MYCALENDAR", "compact date formatting test returned "+dtStr);
+            dtStr = ISO8601Utilities.formatDateTime(dt);
+            Log.v("MYCALENDAR", "full date formatting test returned " + dtStr);
+            dtStr = ISO8601Utilities.formatDateTimeCompact(dt);
+            Log.v("MYCALENDAR", "compact date formatting test returned " + dtStr);
         }
     }
 
@@ -306,7 +305,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         while (prop_id == -1L && cur.moveToNext()) {
             String v = cur.getString(1);
 
-            Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + "): comparing "+t+" with " + v);
+            Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + "): comparing " + t + " with " + v);
             if (v.startsWith(t)) {
                 Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + "): property found");
                 prop_id = cur.getLong(0);
@@ -340,29 +339,29 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         final Uri uri = CalendarContract.Calendars.CONTENT_URI;
         Cursor cur = cr.query(uri, projection, selection, null, null);
 
-        String t=null;
-        while (t==null & cur.moveToNext()) {
+        String t = null;
+        while (t == null & cur.moveToNext()) {
             t = cur.getString(1);
         }
         cur.close();
-        return(t);
+        return (t);
     }
 
     Uri.Builder syncAdapterURI(android.net.Uri uri, int calendarId) {
-        String acct_name=null;
-        String acct_type=null;
+        String acct_name = null;
+        String acct_type = null;
         for (gr.ictpro.jsalatas.agendawidget.model.calendar.Calendar c : Calendars.getCalendarList()) {
-            if (c.getId()==calendarId) {
-                acct_name=c.getAccountName();
+            if (c.getId() == calendarId) {
+                acct_name = c.getAccountName();
                 //acct_type=c.get
                 break;
             }
         }
-        if (acct_name==null) {
-            Log.e("MYCALENDAR", "in syncAdapterURI(): calendar with id "+calendarId+" is unknown");
-            return(null);
+        if (acct_name == null) {
+            Log.e("MYCALENDAR", "in syncAdapterURI(): calendar with id " + calendarId + " is unknown");
+            return (null);
         }
-        return(uri.buildUpon()
+        return (uri.buildUpon()
                 // TODO: should this be false???
                 .appendQueryParameter(android.provider.ContactsContract.CALLER_IS_SYNCADAPTER, "true")
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, acct_name))
@@ -378,7 +377,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
 
         Uri.Builder builder = syncAdapterURI(CalendarContract.ExtendedProperties.CONTENT_URI, getCalendarId());
-        if (builder==null) {
+        if (builder == null) {
             Log.e("MYCALENDAR", "in addExtendedProperty(): syncAdapterURI() failed. Aborting insertion in event " + getId() + " of name=" + name + "; value=" + value);
             return;
         }
@@ -386,57 +385,87 @@ public class ExtendedCalendarEvent extends CalendarEvent {
             Log.v("MYCALENDAR", "in addExtendedProperty(): about to insert ext property for event " + getId() + " of name=" + name + "; value=" + value);
             cr.insert(builder.build(), content);
             Log.v("MYCALENDAR", "in addExtendedProperty(): successfully inserted ext property for event " + getId() + " of name=" + name + "; value=" + value);
-        }
-        catch (Exception x) {
-            Log.e("MYCALENDAR", "in addExtendedProperty(): inserting in event "+getId()+" failed for name="+name+"; value="+value);
-            Log.e("MYCALENDAR", "in addExtendedProperty(): failure exception="+x.toString());
+        } catch (Exception x) {
+            Log.e("MYCALENDAR", "in addExtendedProperty(): inserting in event " + getId() + " failed for name=" + name + "; value=" + value);
+            Log.e("MYCALENDAR", "in addExtendedProperty(): failure exception=" + x.toString());
         }
 
     }
 
-    public void updateExtendedProperty(long exp_prop_id,String value) {
+    public void updateExtendedProperty(long exp_prop_id, String value) {
         ContentValues content = new ContentValues();
         content.put(CalendarContract.ExtendedProperties.VALUE, value);
 
         ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
 
-        Uri u= ContentUris.withAppendedId(CalendarContract.ExtendedProperties.CONTENT_URI, exp_prop_id);
+        Uri u = ContentUris.withAppendedId(CalendarContract.ExtendedProperties.CONTENT_URI, exp_prop_id);
 
         Uri.Builder builder = syncAdapterURI(u, getCalendarId());
-        if (builder==null) {
+        if (builder == null) {
             Log.e("MYCALENDAR", "in updateExtendedProperty(): syncAdapterURI() failed. Aborting update in event " + getId() + " to value=" + value);
             return;
         }
         try {
             // TODO: see if it is correct that we call update() with empty where arg. Maybe that's where we need to put the ext_prop_id?
             cr.update(builder.build(), content, null, null);
-        }
-        catch (Exception x) {
-            Log.e("MYCALENDAR", "in updateExtendedProperty(): updating event "+getId()+" failed for value="+value);
+        } catch (Exception x) {
+            Log.e("MYCALENDAR", "in updateExtendedProperty(): updating event " + getId() + " failed for value=" + value);
         }
 
     }
 
     public void addOrUpdateExtendedProperty(String name, String v) {
-        long prop_id=findExtendedProperty(name, null);
+        long prop_id = findExtendedProperty(name, null);
 
-        if (prop_id==-1L) {
+        if (prop_id == -1L) {
             addExtendedProperty(name, v);
-        }
-        else {
+        } else {
             updateExtendedProperty(prop_id, v);
         }
     }
 
     void addOrUpdateExtendedPropertyJSonEncoded(String name, String v) {
-        long prop_id=findExtendedPropertyJSonEncoded(name, null);
+        long prop_id = findExtendedPropertyJSonEncoded(name, null);
 
-        if (prop_id==-1L) {
-            addExtendedProperty(EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,"[\""+name+"\",\""+v+"\"]");
+        if (prop_id == -1L) {
+            addExtendedProperty(EXTENDED_PROPERTIES_DEFAULT_NAMESPACE, "[\"" + name + "\",\"" + v + "\"]");
+        } else {
+            updateExtendedProperty(prop_id, "[\"" + name + "\",\"" + v + "\"]");
         }
-        else {
-            updateExtendedProperty(prop_id, "[\""+name+"\",\""+v+"\"]");
+    }
+
+    static String updateMultilinePropertyValue(String blob, String key, String newval) {
+        return(addOrUpdateMultilinePropertyValue(blob, key, newval,false));
+    }
+
+    static String addOrUpdateMultilinePropertyValue(String blob, String key, String newval) {
+        return(addOrUpdateMultilinePropertyValue(blob, key, newval,true));
+    }
+
+    static String addOrUpdateMultilinePropertyValue(String blob, String key, String newval, boolean addAllowed) {
+        boolean found=false;
+
+        String[] lines=blob.replace("\r", "").split("\n");
+        List<String> result = new ArrayList(Arrays.asList(lines));
+        for (int index=lines.length-1; index>=0;index--) {
+            if (lines[index].startsWith(key + ":")) {
+                result.set(index,key + ":" + newval);
+                found=true;
+            }
         }
+        if (!found && !addAllowed) return(blob); // save time and allow callers to use String.equals() to check for changes
+
+        if (!found)
+            result.add(key + ":" + newval);
+
+        StringBuffer sb = new StringBuffer();
+        String sep="";
+        for (String s : result) {
+            sb.append(sep);
+            sb.append(s);
+            sep="\r\n";
+        }
+        return(sb.toString());
     }
 
     static String deleteFromMultilinePropertyValue(String blob, String key) {

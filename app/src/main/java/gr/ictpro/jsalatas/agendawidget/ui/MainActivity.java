@@ -1,4 +1,3 @@
-
 package gr.ictpro.jsalatas.agendawidget.ui;
 
 import android.Manifest;
@@ -33,7 +32,6 @@ import android.support.annotation.ColorInt;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
-import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.text.SpannableString;
 import android.text.style.StyleSpan;
@@ -84,6 +82,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String EXTRA_PACKAGE_NAME = "gr.ictpro.jsalatas.agendawidget.action.EXTRA_PACKAGE_NAME";
 
     public static int appWidgetId = 1;
+
+    public static boolean SIMPLER_SERVICE = true;
 
     public static boolean NEW_INTENTS = true;// this CANNOT be false. To switch to false, find a way to re-enable the block under condition "!NEW_INTENTS" that is currently commented out
 
@@ -901,6 +901,9 @@ public class MainActivity extends AppCompatActivity {
         createNotificationChannel(context,NOTIFICATION_CHANNEL_ID);
         createNotificationChannel(context,SERV_NOTIFICATION_CHANNEL_ID);
 
+        if (SIMPLER_SERVICE)
+            startForegroundService(new Intent(this, AgendaUpdateService.class));
+//            if (1==1) return;
 
 //        AsyncTask.execute(new Runnable() {
 //            @Override
@@ -917,13 +920,19 @@ public class MainActivity extends AppCompatActivity {
                         refreshListInUI();
                     }
                 }, 0, (60L*1000L)); // every 1 min
-//            }
-//        });
 
         setupObserver();
 
-        // TODO: see if it's correct to call this one here. I don't think the widget does it
-        updateTaskObservers();
+        // TODO had to put it in a timer. If it's not delayed, it causes an exception because startForeground() was not called in time
+        new Timer().schedule(new TimerTask() {
+            @Override
+            public void run() {
+                // TODO: see if it's correct to call this one here. I don't think the widget does it
+                updateTaskObservers();
+            }
+        }, 5000);
+//            }
+//        });
 
         // TODO: let's see if I can shut down the service that is stealing my broadcasts
         //Context context = AgendaWidgetApplication.getContext();
@@ -1481,9 +1490,57 @@ public class MainActivity extends AppCompatActivity {
             super.onDestroy();
         }
 
+        private void setupService(Intent intent, int flags, int startId) {
+            Context context = this; //AgendaWidgetApplication.getContext();
+            Thread mainThread=new Thread()
+            {
+                public void run() {
+                    try {
+                        getContentResolver().registerContentObserver(CalendarContract.Events.CONTENT_URI, true, calendarObserver);
+                    } catch (SecurityException e) {
+                        // java.lang.SecurityException: Permission Denial: opening provider com.android.providers.calendar.CalendarProvider2
+                        Toast toast = Toast.makeText(context, context.getString(R.string.select_calendars), Toast.LENGTH_LONG);
+                        toast.show();
+                    }
+                    for (AgendaWidget.TaskObserver taskObserver : taskObservers) {
+                        getContentResolver().registerContentObserver(Uri.parse("content://" + taskObserver.uri), true, taskObserver);
+                    }
+                    registerReceiver(agendaChangedReceiver, intentFilter);
+                    if (intent != null && intent.getAction() != null) {
+                        if (intent.getAction().equals(ACTION_UPDATE)) {
+                            agendaChangedReceiver.onReceive(context, intent);
+                        }
+                    }
+
+                    getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+
+            /*
+            TEMPORARY ATTEMPT WITH PERMANENT BROADCASTRECEIVER
+             */
+                    if (NEW_INTENTS) {
+                        Log.v("MYCALENDAR", "Registering receiver br2!!!");
+                        registerReceiver(br2, intentFilter2);
+                    }
+                    /*===*/
+
+                    refreshList(context);
+                    // refresh the notifications at every minute
+                    // TODO: to avoid waking up the service unnecessarily, it would be better to schedule the next notification update based on the event that will be triggered first
+                    new Timer().scheduleAtFixedRate(new TimerTask() {
+                        @Override
+                        public void run() {
+                            updateNotifications(context);
+                        }
+                    }, 0, (60L * 1000L)); // every 1 min
+                }
+            };
+            mainThread.run();
+        }
+
         @Override
         public int onStartCommand(Intent intent, int flags, int startId) {
             Log.v("MYCALENDAR","Service started");
+
             if (PERSISTENT_NOTIFICATION) {
                 if (PERSISTENT_NOTIFICATION_IS_SUMMARY) {
                     Notification n = createSummaryNotification(this, NOTIFICATION_CHANNEL_ID);
@@ -1495,45 +1552,8 @@ public class MainActivity extends AppCompatActivity {
                 }
                 Log.v("MYCALENDAR","calling startForeground()");
             }
-            try {
-                getContentResolver().registerContentObserver(CalendarContract.Events.CONTENT_URI, true, calendarObserver);
-            } catch (SecurityException e) {
-                // java.lang.SecurityException: Permission Denial: opening provider com.android.providers.calendar.CalendarProvider2
-                Context context = this; //AgendaWidgetApplication.getContext();
-                Toast toast = Toast.makeText(context, context.getString(R.string.select_calendars), Toast.LENGTH_LONG);
-                toast.show();
-            }
-            for (AgendaWidget.TaskObserver taskObserver : taskObservers) {
-                getContentResolver().registerContentObserver(Uri.parse("content://" + taskObserver.uri), true, taskObserver);
-            }
-            registerReceiver(agendaChangedReceiver, intentFilter);
-            if (intent != null && intent.getAction() != null) {
-                if (intent.getAction().equals(ACTION_UPDATE)) {
-                    agendaChangedReceiver.onReceive(this, intent);
-                }
-            }
 
-            getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
-
-            /*
-            TEMPORARY ATTEMPT WITH PERMANENT BROADCASTRECEIVER
-             */
-            if (NEW_INTENTS) {
-                Log.v("MYCALENDAR","Registering receiver br2!!!");
-                registerReceiver(br2, intentFilter2);
-            }
-            /*===*/
-
-            Context context = this;//AgendaWidgetApplication.getContext();
-            refreshList(context);
-            // refresh the notifications at every minute
-            // TODO: to avoid waking up the service unnecessarily, it would be better to schedule the next notification update based on the event that will be triggered first
-            new Timer().scheduleAtFixedRate(new TimerTask() {
-                @Override
-                public void run() {
-                    updateNotifications(context);
-                }
-            }, 0, (60L*1000L)); // every 1 min
+            setupService(intent, flags, startId);
 
             return START_STICKY;
         }
@@ -1572,9 +1592,9 @@ public class MainActivity extends AppCompatActivity {
         //    if (!serviceStarted) {
                 // not sure why but we have to call BOTH startForegroundService() and startService() or we get a "did not call StartService() exception"
                 //if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                    context.startForegroundService(new Intent(context, AgendaUpdateService.class));
+if (!SIMPLER_SERVICE)                    context.startForegroundService(new Intent(context, AgendaUpdateService.class));
                 //else
-                    context.startService(new Intent(context, AgendaUpdateService.class));
+if (!SIMPLER_SERVICE)                    context.startService(new Intent(context, AgendaUpdateService.class));
         //        serviceStarted=true;
         //    }
         //}

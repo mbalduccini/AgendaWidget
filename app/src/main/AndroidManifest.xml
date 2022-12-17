@@ -51,30 +51,25 @@
                 android:permission="android.permission.BIND_REMOTEVIEWS">
         </service>
         <service
-                android:name=".ui.AgendaWidget$AgendaUpdateService"
-                android:exported="false">
+                android:name=".ui.AgendaUpdateService"
+                android:enabled="true"
+                android:exported="true">
             <intent-filter>
+                <action android:name="gr.ictpro.jsalatas.agendawidget.action.UPDATE"/>
+                <action android:name="gr.ictpro.jsalatas.agendawidget.ui.AgendaUpdateService"/>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="gr.ictpro.jsalatas.agendawidget.action.UPDATE"/>
             </intent-filter>
         </service>
 
         <!-- https://stackoverflow.com/questions/6391902/how-do-i-start-my-app-when-the-phone-starts-on-android -->
         <receiver
-            android:name=".ui.MainActivity$AgendaUpdateService$StartMyServiceAtBootReceiver"
+            android:name=".ui.AgendaUpdateService$StartMyServiceAtBootReceiver"
             android:label="StartMyServiceAtBootReceiver">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-        <service
-            android:name=".ui.MainActivity$AgendaUpdateService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="gr.ictpro.jsalatas.agendawidget.ui.MainActivity$AgendaUpdateService"/>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="gr.ictpro.jsalatas.agendawidget.action.UPDATE"/>
-            </intent-filter>
-        </service>
 
         <activity android:name=".ui.NewEventActivity"
                   android:theme="@style/AlertDialogTheme">

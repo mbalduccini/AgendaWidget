@@ -331,6 +331,16 @@ public class AgendaUpdateService extends Service {
                             .create();
 */
                     Log.v("MYCALENDAR", "in handleSnoze() event; id=" + event.getId());
+
+                    // Close the notification tray
+                    // I think I need to use the following to close the notification bar on the phone
+                    // https://stackoverflow.com/questions/5029354/how-can-i-programmatically-open-close-notifications-in-android#:~:text=You%20can%20programmatically%20close%20the,and%20the%20recent%20tasks%20dialog.
+                    // https://gist.github.com/XinyueZ/7bad2c02be425b350b7f
+                    // https://developer.android.com/about/versions/12/behavior-changes-all?msclkid=3ad37f25cf7411ecb536010741f51e42#user_experience
+                    Intent closeIntent = new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
+                    context.sendBroadcast(closeIntent);
+
+                    // Display the snooze picker
                     View view = View.inflate(context, R.layout.time_dialog, null);
                     final NumberPicker numberPickerAmount = view.findViewById(R.id.numpicker_amount);
                     numberPickerAmount.setMinValue(1);
@@ -739,7 +749,7 @@ public class AgendaUpdateService extends Service {
                 .setContentTitle(title)
                 .setContentText(descr)
                 .setWhen(startTime)
-                .setShowWhen(false) // we only use the "when" attribute for sorting
+//                .setShowWhen(false) // we only use the "when" attribute for sorting
 //                .setStyle(new NotificationCompat.BigTextStyle()
 //                        .bigText("Much longer text that cannot fit one line..."))
                 .setPriority(NotificationCompat.PRIORITY_MAX) //PRIORITY_DEFAULT)

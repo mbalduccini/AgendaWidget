@@ -107,8 +107,12 @@ public class CalendarEvent implements EventItem {
         return result;
     }
 
+    // reverse the original order, so that most recent reminders are shown first
     @Override
     public int compareTo(EventItem o) {
+        return(-1*compareToORIG(o));
+    }
+    public int compareToORIG(EventItem o) {
         if(o instanceof TaskEvent && !(this instanceof TaskEvent)) {
             return 1;
         }

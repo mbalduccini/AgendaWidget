@@ -13,6 +13,7 @@ import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.AsyncTask;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import gr.ictpro.jsalatas.agendawidget.BuildConfig;
 import gr.ictpro.jsalatas.agendawidget.R;
 import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
 import gr.ictpro.jsalatas.agendawidget.model.EventItem;
@@ -49,7 +51,6 @@ import gr.ictpro.jsalatas.agendawidget.model.task.TaskContract;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
 
 import static android.app.Notification.EXTRA_NOTIFICATION_ID;
-import static gr.ictpro.jsalatas.agendawidget.ui.MainActivity.SIMPLER_SERVICE;
 import static gr.ictpro.jsalatas.agendawidget.ui.MainActivity.formatDate;
 import static gr.ictpro.jsalatas.agendawidget.ui.MainActivity.formatTitle;
 import static gr.ictpro.jsalatas.agendawidget.utils.ISO8601Utilities.secondsToDate;
@@ -140,6 +141,7 @@ public class AgendaUpdateService extends Service {
     public final static boolean NEW_INTENTS = true;// this CANNOT be false. To switch to false, find a way to re-enable the block under condition "!NEW_INTENTS" that is currently commented out
 
     // Notification intent actions
+    //public final static String ACTION_OPEN_APP = "open_app";
     public final static String ACTION_VIEW = "view";
     public final static String ACTION_SNOOZE = "snooze";
     public final static String ACTION_DISMISS = "dismiss";
@@ -176,9 +178,10 @@ public class AgendaUpdateService extends Service {
     public final static int appWidgetId = 1;
 
     boolean updateInProgress = false;
-    boolean serviceStarted = false;
 
     private Object mainSyncObject = new Object();
+
+    boolean serviceRunning = false;
 
     public class CalendarObserver extends ContentObserver {
         String calendar;
@@ -436,7 +439,10 @@ public class AgendaUpdateService extends Service {
                             for (String key : bundle.keySet()) {
                                 Log.e("MYCALENDAR", key + " : " + (bundle.get(key) != null ? bundle.get(key) : "NULL"));
                             }
-                        }                        //int id=intent.getIntExtra(EXTRA_NOTIFICATION_ID,-1);
+                        }
+                        Log.v("MYCALENDAR","BAILING OUT!");
+                        if (1==1) return;
+                        //int id=intent.getIntExtra(EXTRA_NOTIFICATION_ID,-1);
                         //if (id==-1) return;
                         long eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1);
                         if (eventId == -1) return;
@@ -610,7 +616,7 @@ public class AgendaUpdateService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.v("MYCALENDAR","Service started");
-
+        serviceRunning=true;
         if (PERSISTENT_NOTIFICATION) {
             createNotificationChannel(this,NOTIFICATION_CHANNEL_ID);
             createNotificationChannel(this,SERV_NOTIFICATION_CHANNEL_ID);
@@ -674,6 +680,7 @@ public class AgendaUpdateService extends Service {
         actionIntent.setAction(action);
         actionIntent.putExtra(EXTRA_NOTIFICATION_ID, id);
         actionIntent.putExtra(EXTRA_EVENT_ID, eventId);
+        // TODO remove this line
         PendingIntent actionPendingIntent =
                 PendingIntent.getBroadcast(context, id, actionIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
@@ -718,7 +725,7 @@ public class AgendaUpdateService extends Service {
         }
     }
 
-    void createNotification(Context context,long eventId,String title,String descr) {
+    void createNotification(Context context,long eventId,String title,String descr,long startTime) {
         //createNotificationChannel(context,NOTIFICATION_CHANNEL_ID);
 
         int id=generateNotificationId(eventId);
@@ -731,6 +738,8 @@ public class AgendaUpdateService extends Service {
                 .setSmallIcon(R.drawable.ic_notes)
                 .setContentTitle(title)
                 .setContentText(descr)
+                .setWhen(startTime)
+                .setShowWhen(false) // we only use the "when" attribute for sorting
 //                .setStyle(new NotificationCompat.BigTextStyle()
 //                        .bigText("Much longer text that cannot fit one line..."))
                 .setPriority(NotificationCompat.PRIORITY_MAX) //PRIORITY_DEFAULT)
@@ -782,6 +791,10 @@ public class AgendaUpdateService extends Service {
 
     public Notification createSummaryNotification(Context appContext,String channel, boolean doDisplayNotification) {
         //createNotificationChannel(appContext,channel);
+        //PendingIntent tapIntent=createActionIntent(appContext,0,0,ACTION_OPEN_APP);
+        PackageManager pm = getPackageManager();
+        Intent launchIntent = pm.getLaunchIntentForPackage(BuildConfig.APPLICATION_ID);
+        PendingIntent tapIntent = PendingIntent.getActivity(this, 0, launchIntent, 0);
         Notification summaryNotification =
                 new NotificationCompat.Builder(appContext, channel)
                         .setContentTitle("Reminders")
@@ -798,6 +811,7 @@ public class AgendaUpdateService extends Service {
  */
                         .setPriority(NotificationCompat.PRIORITY_MAX)//PRIORITY_DEFAULT)
                         .setCategory(NotificationCompat.CATEGORY_EVENT)
+                        .setContentIntent(tapIntent)
                         //.setStyle(new NotificationCompat.InboxStyle())
                         // Do not trigger an alert if the notification is already showing and is updated
                         .setOnlyAlertOnce(true)
@@ -825,6 +839,12 @@ public class AgendaUpdateService extends Service {
     public Notification createForegroundServiceNotification(Context appContext, boolean doDisplayNotification) {
         //createNotificationChannel(appContext,SERV_NOTIFICATION_CHANNEL_ID);
         Log.v("MYCALENDAR","Creating foreground service notification on "+SERV_NOTIFICATION_CHANNEL_ID);
+        //PendingIntent tapIntent=createActionIntent(appContext,0,0,ACTION_OPEN_APP);
+        // Ensure that the activity is started only once
+        // https://stackoverflow.com/questions/9598348/android-how-do-i-avoid-starting-activity-which-is-already-in-stack
+        PackageManager pm = getPackageManager();
+        Intent launchIntent = pm.getLaunchIntentForPackage(BuildConfig.APPLICATION_ID);
+        PendingIntent tapIntent = PendingIntent.getActivity(this, 0, launchIntent, 0);
         Notification summaryNotification =
                 new NotificationCompat.Builder(appContext, SERV_NOTIFICATION_CHANNEL_ID)
                         .setContentTitle("AgendaWidget Service")
@@ -841,6 +861,7 @@ public class AgendaUpdateService extends Service {
  */
                         .setPriority(NotificationCompat.PRIORITY_MAX)//PRIORITY_DEFAULT)
                         .setCategory(NotificationCompat.CATEGORY_EVENT)
+                        .setContentIntent(tapIntent)
                         //.setStyle(new NotificationCompat.InboxStyle())
                         // Do not trigger an alert if the notification is already showing and is updated
                         .setOnlyAlertOnce(true)
@@ -886,7 +907,7 @@ public class AgendaUpdateService extends Service {
                 if (calendarEvent.isTriggered()) {
                     SpannableString spanDate = formatDate(context, calendarEvent, false); //new SpannableString(sb.toString());
                     SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
-                    createNotification(context, calendarEvent.getId(), spanTitle.toString(), spanDate.toString());
+                    createNotification(context, calendarEvent.getId(), spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime());
                     newNotifications.add(calendarEvent.getId());
                 }
             }
@@ -965,19 +986,6 @@ public class AgendaUpdateService extends Service {
             taskObservers[i] = new AgendaWidget.TaskObserver(new Handler(), uri);
             i++;
         }
-
-        //synchronized(mainSyncObject) {
-        //    if (!serviceStarted) {
-        // not sure why but we have to call BOTH startForegroundService() and startService() or we get a "did not call StartService() exception"
-        //if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-//        if (!SIMPLER_SERVICE)
-//            context.startForegroundService(new Intent(context, AgendaUpdateService.class));
-        //else
-//        if (!SIMPLER_SERVICE)
-//            context.startService(new Intent(context, AgendaUpdateService.class));
-        //        serviceStarted=true;
-        //    }
-        //}
     }
 
     private void sendUpdate(Context context, Intent intent) {
@@ -1066,6 +1074,10 @@ public class AgendaUpdateService extends Service {
 
     public List<EventItem> getEvents() {
         return(events);
+    }
+
+    public boolean isRunning() {
+        return(serviceRunning);
     }
     /* <===== external API */
 }

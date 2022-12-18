@@ -13,8 +13,10 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.provider.CalendarContract;
 import android.support.annotation.ColorInt;
 import android.support.v4.app.NotificationCompat;
@@ -41,6 +43,7 @@ import java.util.GregorianCalendar;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import gr.ictpro.jsalatas.agendawidget.BuildConfig;
 import gr.ictpro.jsalatas.agendawidget.R;
 import gr.ictpro.jsalatas.agendawidget.application.AgendaWidgetApplication;
 import gr.ictpro.jsalatas.agendawidget.model.EventItem;
@@ -68,8 +71,6 @@ public class MainActivity extends AppCompatActivity {
 
     boolean mBounded;
     AgendaUpdateService mServer;
-
-    public static boolean SIMPLER_SERVICE = true;
 
     // Stay open when keyboard is connected/disconnected
     // https://stackoverflow.com/questions/4116058/avoiding-application-restart-when-hardware-keyboard-opens
@@ -544,29 +545,9 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-//        settings = new Settings(this, widgetId);
-        if (SIMPLER_SERVICE) {
-            //startForegroundService(new Intent(this, AgendaUpdateService.class));
-            startService();
-        }
+        requestOverlayPermission();
 
-//        AsyncTask.execute(new Runnable() {
-//            @Override
-//            public void run() {
-
-        // all refreshList() calls moved to the service
-//                refreshList(context);
-//                refreshListInUI();
-                // TODO: this is primitive. We should receive a refresh-UI intent from the service instead
-                new Timer().scheduleAtFixedRate(new TimerTask() {
-                    @Override
-                    public void run() {
-                        refreshListInUI();
-                    }
-                }, 0, (60L*1000L)); // every 1 min
-
-//            }
-//        });
+        // NO OTHER CODE HERE: starting and setting up the service as needed is done in onServiceConnected()
 
         // TODO: let's see if I can shut down the service that is stealing my broadcasts
         //Context context = AgendaWidgetApplication.getContext();
@@ -596,6 +577,67 @@ public class MainActivity extends AppCompatActivity {
         }, 0, (60L*1000L)); // every 1 min
         */
     }
+
+    // https://stackoverflow.com/questions/40355344/how-to-programmatically-grant-the-draw-over-other-apps-permission-in-android
+    // https://stackoverflow.com/questions/40437721/how-to-give-screen-overlay-permission-on-my-activity
+    private void requestOverlayPermission() {
+        if (android.provider.Settings.canDrawOverlays(this)) return;
+
+        // TODO transition app to androix so I can use Snackbar
+        Uri uri = Uri.parse("package:" + BuildConfig.APPLICATION_ID);
+        Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri);
+        startActivity(intent);
+
+        /*
+        Snackbar.make(findViewById(android.R.id.content), "Permission needed!", Snackbar.LENGTH_INDEFINITE)
+                .setAction("Settings", new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+
+                        try {
+                            Uri uri = Uri.parse("package:" + BuildConfig.APPLICATION_ID);
+                            Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri);
+                            startActivity(intent);
+                        } catch (Exception ex) {
+                            Intent intent = new Intent();
+                            intent.setAction(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+                            startActivity(intent);
+                        }
+                    }
+                })
+                .show();
+         */
+    }
+
+    // https://stackoverflow.com/questions/39256501/check-if-battery-optimization-is-enabled-or-not-for-an-app
+    /*
+    private void requestIgnoreBatteryOptimizationPermission() {
+        //final int IGNORE_BATTERY_OPTIMIZATION_REQUEST = 1002;
+
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                Snackbar.make(findViewById(android.R.id.content), "Permission needed!", Snackbar.LENGTH_INDEFINITE)
+                        .setAction("Settings", new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+
+                                try {
+                                    Uri uri = Uri.parse("package:" + BuildConfig.APPLICATION_ID);
+                                    Intent intent = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, uri);
+                                    startActivity(intent);
+                                } catch (Exception ex) {
+                                    Intent intent = new Intent();
+                                    intent.setAction(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                                    startActivity(intent);
+                                }
+                            }
+                        })
+                        .show();
+            }
+        }
+    }
+     */
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -723,6 +765,18 @@ public class MainActivity extends AppCompatActivity {
             mBounded = true;
             AgendaUpdateService.LocalBinder mLocalBinder = (AgendaUpdateService.LocalBinder)service;
             mServer = mLocalBinder.getServerInstance();
+
+            if (!mServer.isRunning()) {
+                startService();
+            }
+            // TODO: this is primitive. We should receive a refresh-UI intent from the service instead
+            new Timer().scheduleAtFixedRate(new TimerTask() {
+                @Override
+                public void run() {
+                    refreshListInUI();
+                }
+            }, 0, (60L*1000L)); // every 1 min
+
         }
     };
 

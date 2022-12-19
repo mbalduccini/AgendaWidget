@@ -420,8 +420,6 @@ public class AgendaUpdateService extends Service {
                 public void onReceive(Context context, Intent intent) {
                     if (intent.getAction().equals(ACTION_DISMISS)) {
                         Log.v("MYCALENDAR", "received dismiss event");
-//                        Log.v("MYCALENDAR", "BAILING OUT!!!");
-//                        if (1 == 1) return;
                         ExtendedCalendarEvent event = eventFromIntent(intent);
                         if (event != null) {
                             handleDismiss(context, event);
@@ -450,8 +448,6 @@ public class AgendaUpdateService extends Service {
                                 Log.e("MYCALENDAR", key + " : " + (bundle.get(key) != null ? bundle.get(key) : "NULL"));
                             }
                         }
-                        Log.v("MYCALENDAR","BAILING OUT!");
-                        if (1==1) return;
                         //int id=intent.getIntExtra(EXTRA_NOTIFICATION_ID,-1);
                         //if (id==-1) return;
                         long eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1);

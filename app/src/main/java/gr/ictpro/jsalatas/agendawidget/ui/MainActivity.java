@@ -58,6 +58,7 @@ import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
 import gr.ictpro.jsalatas.agendawidget.utils.DateUtils;
 
 import static gr.ictpro.jsalatas.agendawidget.ui.AgendaUpdateService.NOTIFICATION_CHANNEL_ID;
+import static java.lang.Integer.min;
 
 public class MainActivity extends AppCompatActivity {
     private Context context;
@@ -321,6 +322,17 @@ public class MainActivity extends AppCompatActivity {
                         Log.w("MYCALENDAR","snooze button clicked for entry #"+position);
                         if (mServer==null) return;
                         EventItem item = mServer.getEvents().get(position);
+                        Log.w("MYCALENDAR","entry is ExtendedCalendarEvent? "+(item instanceof ExtendedCalendarEvent));
+
+                        if (item instanceof ExtendedCalendarEvent) {
+                            mServer.handleSnooze(context, (ExtendedCalendarEvent)item);
+                            mServer.removeNotification(context,((ExtendedCalendarEvent) item).getId());
+                            synchronized(this) {
+                                //mServer.getEvents() = ExtendedCalendars.refreshOneEvent(AgendaUpdateService.appWidgetId, ((ExtendedCalendarEvent) item).getId(), mServer.getEvents());
+                                mServer.refreshOneEvent(AgendaUpdateService.appWidgetId, ((ExtendedCalendarEvent) item).getId());
+                                refreshListCached();
+                            }
+                        }
                     }
                 });
                 Button btn=((Button) v.findViewById(R.id.btn_dismiss));

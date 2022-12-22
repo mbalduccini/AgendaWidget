@@ -50,7 +50,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         int minutes;
         int type;
         long ack = -1L;
-        long absoluteTS = -1L;
+        long absoluteTS = -1L; // absoluteTS is in seconds
 
         public Reminder(int minutes, int type) {
             this.minutes = minutes;

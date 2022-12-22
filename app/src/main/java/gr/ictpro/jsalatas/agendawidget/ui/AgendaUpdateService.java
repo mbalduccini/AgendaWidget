@@ -261,6 +261,83 @@ public class AgendaUpdateService extends Service {
         }
     }
 
+    public void handleSnooze(Context context, ExtendedCalendarEvent event) {
+
+        // The code below is a combination of:
+        //   https://stackoverflow.com/questions/3599563/alert-dialog-from-android-service
+        //   https://stackoverflow.com/questions/7918571/how-to-display-a-dialog-from-a-service
+        //   https://stackoverflow.com/questions/7847623/how-to-pick-a-second-using-timepicker-android
+        // Note: user must give "draw over other apps / appear on top" permission
+        // in Settings > Apps > Special access
+        // or else the app will CRASH
+/*                        AlertDialog alertDialog = new AlertDialog.Builder(context)
+                            .setTitle("Title")
+                            .setMessage("Are you sure?")
+                            .create();
+*/
+        Log.v("MYCALENDAR", "in handleSnooze() event; id=" + event.getId());
+
+        // Close the notification tray
+        // I think I need to use the following to close the notification bar on the phone
+        // https://stackoverflow.com/questions/5029354/how-can-i-programmatically-open-close-notifications-in-android#:~:text=You%20can%20programmatically%20close%20the,and%20the%20recent%20tasks%20dialog.
+        // https://gist.github.com/XinyueZ/7bad2c02be425b350b7f
+        // https://developer.android.com/about/versions/12/behavior-changes-all?msclkid=3ad37f25cf7411ecb536010741f51e42#user_experience
+        Intent closeIntent = new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
+        context.sendBroadcast(closeIntent);
+
+        // Display the snooze picker
+        View view = View.inflate(context, R.layout.time_dialog, null);
+        final NumberPicker numberPickerAmount = view.findViewById(R.id.numpicker_amount);
+        numberPickerAmount.setMinValue(1);
+        numberPickerAmount.setMaxValue(99);
+        numberPickerAmount.setValue(1);//sharedPreferences.getInt("Seconds", 0));
+        // https://stackoverflow.com/questions/8227073/using-numberpicker-widget-with-strings
+        final NumberPicker numberPickerUnit = view.findViewById(R.id.numpicker_unit);
+        numberPickerUnit.setMinValue(0);
+        numberPickerUnit.setMaxValue(3);
+        final String[] units = new String[]{"minutes", "hours", "days", "weeks"};
+        final int[] minsPerUnit = new int[]{1, 60, 60 * 24, 60 * 24 * 7};
+        numberPickerUnit.setDisplayedValues(new String[]{"minutes", "hours", "days", "weeks"});
+
+        Button cancel = view.findViewById(R.id.cancel);
+        Button ok = view.findViewById(R.id.ok);
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setView(view);
+        final AlertDialog alertDialog = builder.create();
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                alertDialog.dismiss();
+            }
+        });
+        ok.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Log.v("MYCALENDAR", "snooze picked: " + numberPickerAmount.getValue() + " in " + numberPickerUnit.getValue() + "; mins=" + ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]));
+//                        timeTV.setText(String.format("%1$d:%2$02d:%3$02d", numberPickerHour.getValue(), numberPickerMinutes.getValue(), numberPickerSeconds.getValue()));
+//                    SharedPreferences.Editor editor = sharedPreferences.edit();
+//                    editor.putInt("Hours", numberPickerHour.getValue());
+//                    editor.putInt("Minutes", numberPickerMinutes.getValue());
+//                    editor.putInt("Seconds", numberPickerSeconds.getValue());
+//                    editor.apply();
+                alertDialog.dismiss();
+
+                long snoozeMinutes = ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]);
+                ExtendedCalendars.snoozeCalDAVEventReminders(event, snoozeMinutes);
+                removeNotification(context, event.getId());
+                // TODO: find a way to update the app's main window from here. Probably an intent?
+                                /*
+                                synchronized (this) {
+                                    events = refreshOneEvent(appWidgetId, event.getId(), events);
+                                    refreshListCached();
+                                }
+                                */
+            }
+        });
+        alertDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);//.TYPE_SYSTEM_ALERT);
+        alertDialog.show();
+    }
+
     // TODO remove this and fold into the other receiver -- or decide once and for all to keep them separate
     private final BroadcastReceiver agendaChangedReceiver = new
             BroadcastReceiver() {
@@ -301,7 +378,8 @@ public class AgendaUpdateService extends Service {
         }
     }
 
-    private final BroadcastReceiver br2 = new
+    // TODO make this private again. To do that, I need to expose handleSnooze() so that MainActivity can get to it
+    public final BroadcastReceiver br2 = new
             BroadcastReceiver() {
                 void handleDismiss(Context context, ExtendedCalendarEvent event) {
                     Log.v("MYCALENDAR", "in handleDismiss(); id=" + event.getId());
@@ -314,84 +392,6 @@ public class AgendaUpdateService extends Service {
                                     refreshListCached();
                                 }
                         */
-                }
-
-                void handleSnooze(Context context, ExtendedCalendarEvent event) {
-
-                    // The code below is a combination of:
-                    //   https://stackoverflow.com/questions/3599563/alert-dialog-from-android-service
-                    //   https://stackoverflow.com/questions/7918571/how-to-display-a-dialog-from-a-service
-                    //   https://stackoverflow.com/questions/7847623/how-to-pick-a-second-using-timepicker-android
-                    // Note: user must give "draw over other apps / appear on top" permission
-                    // in Settings > Apps > Special access
-                    // or else the app will CRASH
-/*                        AlertDialog alertDialog = new AlertDialog.Builder(context)
-                            .setTitle("Title")
-                            .setMessage("Are you sure?")
-                            .create();
-*/
-                    Log.v("MYCALENDAR", "in handleSnoze() event; id=" + event.getId());
-
-                    // Close the notification tray
-                    // I think I need to use the following to close the notification bar on the phone
-                    // https://stackoverflow.com/questions/5029354/how-can-i-programmatically-open-close-notifications-in-android#:~:text=You%20can%20programmatically%20close%20the,and%20the%20recent%20tasks%20dialog.
-                    // https://gist.github.com/XinyueZ/7bad2c02be425b350b7f
-                    // https://developer.android.com/about/versions/12/behavior-changes-all?msclkid=3ad37f25cf7411ecb536010741f51e42#user_experience
-                    Intent closeIntent = new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
-                    context.sendBroadcast(closeIntent);
-
-                    // Display the snooze picker
-                    View view = View.inflate(context, R.layout.time_dialog, null);
-                    final NumberPicker numberPickerAmount = view.findViewById(R.id.numpicker_amount);
-                    numberPickerAmount.setMinValue(1);
-                    numberPickerAmount.setMaxValue(99);
-                    numberPickerAmount.setValue(1);//sharedPreferences.getInt("Seconds", 0));
-                    // https://stackoverflow.com/questions/8227073/using-numberpicker-widget-with-strings
-                    final NumberPicker numberPickerUnit = view.findViewById(R.id.numpicker_unit);
-                    numberPickerUnit.setMinValue(0);
-                    numberPickerUnit.setMaxValue(3);
-                    final String[] units = new String[]{"minutes", "hours", "days", "weeks"};
-                    final int[] minsPerUnit = new int[]{1, 60, 60 * 24, 60 * 24 * 7};
-                    numberPickerUnit.setDisplayedValues(new String[]{"minutes", "hours", "days", "weeks"});
-
-                    Button cancel = view.findViewById(R.id.cancel);
-                    Button ok = view.findViewById(R.id.ok);
-                    AlertDialog.Builder builder = new AlertDialog.Builder(context);
-                    builder.setView(view);
-                    final AlertDialog alertDialog = builder.create();
-                    cancel.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            alertDialog.dismiss();
-                        }
-                    });
-                    ok.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            Log.v("MYCALENDAR", "snooze picked: " + numberPickerAmount.getValue() + " in " + numberPickerUnit.getValue() + "; mins=" + ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]));
-//                        timeTV.setText(String.format("%1$d:%2$02d:%3$02d", numberPickerHour.getValue(), numberPickerMinutes.getValue(), numberPickerSeconds.getValue()));
-//                    SharedPreferences.Editor editor = sharedPreferences.edit();
-//                    editor.putInt("Hours", numberPickerHour.getValue());
-//                    editor.putInt("Minutes", numberPickerMinutes.getValue());
-//                    editor.putInt("Seconds", numberPickerSeconds.getValue());
-//                    editor.apply();
-                            alertDialog.dismiss();
-
-                            long snoozeMinutes = ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]);
-                            ExtendedCalendars.snoozeCalDAVEventReminders(event, snoozeMinutes);
-                            removeNotification(context, event.getId());
-                            // TODO: find a way to update the app's main window from here. Probably an intent?
-                                /*
-                                synchronized (this) {
-                                    events = refreshOneEvent(appWidgetId, event.getId(), events);
-                                    refreshListCached();
-                                }
-                                */
-                        }
-                    });
-                    alertDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);//.TYPE_SYSTEM_ALERT);
-                    alertDialog.show();
-
                 }
 
                 ExtendedCalendarEvent eventFromIntent(Intent intent) {

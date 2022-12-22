@@ -59,6 +59,8 @@ import static java.lang.Long.max;
 
 public class ExtendedCalendars extends Calendars {
     public static int LOOKAHEAD_MINUTES=10;
+    public static final boolean USE_EMCLIENT_ENTRIES=false; // as far as I can tell, these are not propagated to the calendar server. They remain only on the client and thus cause issues because other clients do not have that information
+    public static final boolean CREATE_EMCLIENT_SNOOZE_ENTRIES=false; // as far as I can tell, these are not propagated to the calendar server. They remain only on the client and thus cause issues because other clients do not have that information
 
     public static List<EventItem> getEvents(int appWidgetId) {
         return(getEvents(appWidgetId,new ExtendedCalendarFetchAdapter(LOOKAHEAD_MINUTES)));
@@ -295,31 +297,32 @@ public class ExtendedCalendars extends Calendars {
 
             updateACKandAbsoluteSnooze(calendarEvent,dtStr,ackTimeSec,false);
 
-            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
-            ext_projection = new String[]{
-                    CalendarContract.ExtendedProperties._ID,
-                    CalendarContract.ExtendedProperties.VALUE,
-            };
-            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+            if (USE_EMCLIENT_ENTRIES) {
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + calendarEvent.getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"private:http://emclient.com/ns/#calendar\"";
+                ext_projection = new String[]{
+                        CalendarContract.ExtendedProperties._ID,
+                        CalendarContract.ExtendedProperties.VALUE,
+                };
+                Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
 
-            ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
-            Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
-            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
-            while (cur.moveToNext()) {
-                String v = cur.getString(1);
-                String v2=deleteFromMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME");
-                if (!v.equals(v2)) {
-                    if (!v2.equals("")) {
-                        calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
-                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed from private:http://emclient.com/ns/#calendar");
-                    }
-                    else {
-                        calendarEvent.deleteExtendedProperty(cur.getLong(0));
-                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed (full private:http://emclient.com/ns/#calendar property removed)");
+                ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
+                Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+                cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                while (cur.moveToNext()) {
+                    String v = cur.getString(1);
+                    String v2 = deleteFromMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME");
+                    if (!v.equals(v2)) {
+                        if (!v2.equals("")) {
+                            calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed from private:http://emclient.com/ns/#calendar");
+                        } else {
+                            calendarEvent.deleteExtendedProperty(cur.getLong(0));
+                            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed (full private:http://emclient.com/ns/#calendar property removed)");
+                        }
                     }
                 }
+                cur.close();
             }
-            cur.close();
             Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): done setting properties for calendarEvent with title "+ calendarEvent.getTitle());
 
             // Remove X-MOZ-SNOOZE-TIME if present
@@ -339,8 +342,6 @@ public class ExtendedCalendars extends Calendars {
         String[] ext_projection;
         Cursor cur;
 
-        boolean TEST_ONLY=false;//true;
-
         if (event instanceof ExtendedCalendarEvent && !(event instanceof TaskEvent)) {
             ExtendedCalendarEvent calendarEvent = (ExtendedCalendarEvent) event;
 
@@ -349,7 +350,6 @@ public class ExtendedCalendars extends Calendars {
             //dateFormat.timeZone=TimeZone.getTimeZone("UTC")
 
 
-            if (!TEST_ONLY)
             markEventDirty(calendarEvent);
 
 
@@ -359,6 +359,7 @@ public class ExtendedCalendars extends Calendars {
             long curr_time = System.currentTimeMillis(); // this *is* supposed to be in millis
             String dtStr=ISO8601Utilities.formatDateTimeCompact(millisToDate(System.currentTimeMillis()));
             long notifTSMillis = System.currentTimeMillis()+(snoozeMinutes*60000L);
+            String notifTSMillisStr=ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis));
             // TODO: figure out if I need this block
             /*
         // Generation of X-MOZ-SNOOZE-TIME
@@ -370,53 +371,57 @@ public class ExtendedCalendars extends Calendars {
 
             updateACKandAbsoluteSnooze(calendarEvent,dtStr,curr_time / 1000L,true);
 
-            // DIFF: the block below is fairly different, because it's about SNOOZE
-            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
-            ext_projection = new String[]{
-                    CalendarContract.ExtendedProperties._ID,
-                    CalendarContract.ExtendedProperties.VALUE,
-            };
-            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
-
             ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
             Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
-            boolean emclient_moz_snooze_found=false;
-            long emcli_prop_id=-1L;
-            String emcli_prop_val="";
-            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
-            while (cur.moveToNext()) {
-                String v = cur.getString(1);
-                emcli_prop_id=cur.getLong(0);
-                emcli_prop_val=v;
-                String v2=updateMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis))); //dateFormat.format(notifTS))
-                if (!v.equals(v2)) {
-                    Log.v("MYCALENDAR","found that v!=v2 where they are "+v+"; "+v2);
-                    if (!TEST_ONLY)
-                    calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
-                    emclient_moz_snooze_found = true;
+            if (USE_EMCLIENT_ENTRIES) {
+                // DIFF: the block below is fairly different, because it's about SNOOZE
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + calendarEvent.getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"private:http://emclient.com/ns/#calendar\"";
+                ext_projection = new String[]{
+                        CalendarContract.ExtendedProperties._ID,
+                        CalendarContract.ExtendedProperties.VALUE,
+                };
+                Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+                builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
+                boolean emclient_moz_snooze_found = false;
+                long emcli_prop_id = -1L;
+                String emcli_prop_val = "";
+                cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                while (cur.moveToNext()) {
+                    String v = cur.getString(1);
+                    emcli_prop_id = cur.getLong(0);
+                    emcli_prop_val = v;
+                    String v2 = updateMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis))); //dateFormat.format(notifTS))
+                    if (!v.equals(v2)) {
+                        if (CREATE_EMCLIENT_SNOOZE_ENTRIES) {
+                            Log.v("MYCALENDAR", "found that v!=v2 where they are " + v + "; " + v2);
+                            calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                        }
+                        emclient_moz_snooze_found = true;
+                    }
                 }
+                cur.close();
+                if (!emclient_moz_snooze_found) {
+                    if (emcli_prop_id != -1L) {
+                        if (CREATE_EMCLIENT_SNOOZE_ENTRIES) {
+                            // [MB] implementing addMultilinePropertyValue() would do, but I prefer to play it safe in case earlier code missed that it is there
+                            String v = addOrUpdateMultilinePropertyValue(emcli_prop_val, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                            calendarEvent.updateExtendedProperty(emcli_prop_id, v);
+                        }
+                    } else {
+                        if (CREATE_EMCLIENT_SNOOZE_ENTRIES) {
+                            calendarEvent.addExtendedProperty(
+                                    "private:http://emclient.com/ns/#calendar",
+                                    "X-MOZ-SNOOZE-TIME:" + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                        }
+                    }
+                }
+                Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): emclient's X-MOZ-SNOOZE-TIME added or updated to: " + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
             }
-            cur.close();
-            if (!emclient_moz_snooze_found) {
-                if (emcli_prop_id!=-1L) {
-                    // [MB] implementing addMultilinePropertyValue() would do, but I prefer to play it safe in case earlier code missed that it is there
-                    String v=addOrUpdateMultilinePropertyValue(emcli_prop_val, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
-                    if (!TEST_ONLY)
-                    calendarEvent.updateExtendedProperty(emcli_prop_id, v);
-                }
-                else {
-                    if (!TEST_ONLY)
-                    calendarEvent.addExtendedProperty(
-                            "private:http://emclient.com/ns/#calendar",
-                            "X-MOZ-SNOOZE-TIME:" + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
-                }
-            }
-            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): emclient's X-MOZ-SNOOZE-TIME added or updated to: " + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
             Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): done setting some test properties for Google Calendar, for calendarEvent with title "+ calendarEvent.getTitle());
 
-            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting X-MOZ-SNOOZE-TIME to " + dtStr);
-            if (!TEST_ONLY)
-            calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-SNOOZE-TIME", dtStr);
+            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting X-MOZ-SNOOZE-TIME to " + notifTSMillisStr);
+            calendarEvent.addOrUpdateExtendedPropertyJSonEncoded("X-MOZ-SNOOZE-TIME", notifTSMillisStr);
 
             // Create an absolute reminder for this snooze (recall that all past absolute reminders have been removed)
             long newMinutes=(dateToSeconds(calendarEvent.getStartDate())/60)-(notifTSMillis/60000L); // BUG HERE: everywhere else it is seconds
@@ -425,7 +430,6 @@ public class ExtendedCalendars extends Calendars {
             content.put(CalendarContract.Reminders.EVENT_ID, calendarEvent.getId());
             content.put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT);
             content.put(CalendarContract.Reminders.MINUTES, newMinutes);
-            if (!TEST_ONLY)
             cr.insert(CalendarContract.Reminders.CONTENT_URI, content);
 
             Log.v("MINE", "in snoozeCalDAVEventReminders(): added reminder trigger for " + newMinutes);
@@ -434,15 +438,12 @@ public class ExtendedCalendars extends Calendars {
             String ACK_SEP = ";";
             String pname1 = "X-CALDAV-ANDROID-ACK";
             String pname2 = "X-CALDAV-ANDROID-MOZACK";
-            if (!TEST_ONLY)
             calendarEvent.addExtendedProperty(
                     EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
                     "[\"" + pname1 + "\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + ACK_SEP + curr_time/*notifTS*/ + "\"]");
-            if (!TEST_ONLY)
             calendarEvent.addExtendedProperty(
                     EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
                     "[\"" + pname2 + "\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + ACK_SEP + curr_time/*notifTS*/ + "\"]");
-            if (!TEST_ONLY)
             calendarEvent.addExtendedProperty(
                     EXTENDED_PROPERTIES_DEFAULT_NAMESPACE,
                     "[\"X-CALDAV-ANDROID-ABSOLUTE\",\"" + CalendarContract.Reminders.METHOD_ALERT + ACK_SEP + newMinutes + "\"]");
@@ -485,31 +486,32 @@ public class ExtendedCalendars extends Calendars {
             // The following property is only for Google Calendars (not CalDAV). It will not be read back on other devices if we are using CalDAV
             calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
 
-            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
-            ext_projection = new String[]{
-                    CalendarContract.ExtendedProperties._ID,
-                    CalendarContract.ExtendedProperties.VALUE,
-            };
-            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
-
             ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
             Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
-            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
-            while (cur.moveToNext()) {
-                String v = cur.getString(1);
-                String v2=deleteFromMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME");
-                if (!v.equals(v2)) {
-                    if (!v2.equals("")) {
-                        calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
-                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed from private:http://emclient.com/ns/#calendar");
-                    }
-                    else {
-                        calendarEvent.deleteExtendedProperty(cur.getLong(0));
-                        Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed (full private:http://emclient.com/ns/#calendar property removed)");
+            if (USE_EMCLIENT_ENTRIES) {
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + calendarEvent.getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"private:http://emclient.com/ns/#calendar\"";
+                ext_projection = new String[]{
+                        CalendarContract.ExtendedProperties._ID,
+                        CalendarContract.ExtendedProperties.VALUE,
+                };
+                Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+                cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                while (cur.moveToNext()) {
+                    String v = cur.getString(1);
+                    String v2 = deleteFromMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME");
+                    if (!v.equals(v2)) {
+                        if (!v2.equals("")) {
+                            calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed from private:http://emclient.com/ns/#calendar");
+                        } else {
+                            calendarEvent.deleteExtendedProperty(cur.getLong(0));
+                            Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): X-MOZ-SNOOZE-TIME removed (full private:http://emclient.com/ns/#calendar property removed)");
+                        }
                     }
                 }
+                cur.close();
             }
-            cur.close();
             Log.v("MYCALENDAR", "in dismissCalDAVEventReminders(): done setting properties for calendarEvent with title "+ calendarEvent.getTitle());
 
             // Remove X-MOZ-SNOOZE-TIME if present
@@ -640,48 +642,50 @@ public class ExtendedCalendars extends Calendars {
             if (!TEST_ONLY)
                 calendarEvent.addOrUpdateExtendedProperty("private:X-MOZ-LASTACK",dtStr);
 
-            // DIFF: the block below is fairly different, because it's about SNOOZE
-            ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \"private:http://emclient.com/ns/#calendar\"";
-            ext_projection = new String[]{
-                    CalendarContract.ExtendedProperties._ID,
-                    CalendarContract.ExtendedProperties.VALUE,
-            };
-            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
-
             ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
             Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
-            boolean emclient_moz_snooze_found=false;
-            long emcli_prop_id=-1L;
-            String emcli_prop_val="";
-            cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
-            while (cur.moveToNext()) {
-                String v = cur.getString(1);
-                emcli_prop_id=cur.getLong(0);
-                emcli_prop_val=v;
-                String v2=updateMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis))); //dateFormat.format(notifTS))
-                if (!v.equals(v2)) {
-                    Log.v("MYCALENDAR","found that v!=v2 where they are "+v+"; "+v2);
-                    if (!TEST_ONLY)
-                        calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
-                    emclient_moz_snooze_found = true;
+            if (USE_EMCLIENT_ENTRIES) {
+                // DIFF: the block below is fairly different, because it's about SNOOZE
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + calendarEvent.getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"private:http://emclient.com/ns/#calendar\"";
+                ext_projection = new String[]{
+                        CalendarContract.ExtendedProperties._ID,
+                        CalendarContract.ExtendedProperties.VALUE,
+                };
+                Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): looking for X-MOZ-SNOOZE-TIME in private:http://emclient.com/ns/#calendar");
+
+                boolean emclient_moz_snooze_found = false;
+                long emcli_prop_id = -1L;
+                String emcli_prop_val = "";
+                cur = cr.query(builder.build(), ext_projection, ext_selection, null, null);
+                while (cur.moveToNext()) {
+                    String v = cur.getString(1);
+                    emcli_prop_id = cur.getLong(0);
+                    emcli_prop_val = v;
+                    String v2 = updateMultilinePropertyValue(v, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis))); //dateFormat.format(notifTS))
+                    if (!v.equals(v2)) {
+                        Log.v("MYCALENDAR", "found that v!=v2 where they are " + v + "; " + v2);
+                        if (!TEST_ONLY && CREATE_EMCLIENT_SNOOZE_ENTRIES)
+                            calendarEvent.updateExtendedProperty(cur.getLong(0), v2);
+                        emclient_moz_snooze_found = true;
+                    }
                 }
+                cur.close();
+                if (!emclient_moz_snooze_found) {
+                    if (emcli_prop_id != -1L) {
+                        // [MB] implementing addMultilinePropertyValue() would do, but I prefer to play it safe in case earlier code missed that it is there
+                        String v = addOrUpdateMultilinePropertyValue(emcli_prop_val, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                        if (!TEST_ONLY && CREATE_EMCLIENT_SNOOZE_ENTRIES)
+                            calendarEvent.updateExtendedProperty(emcli_prop_id, v);
+                    } else {
+                        if (CREATE_EMCLIENT_SNOOZE_ENTRIES) {
+                            calendarEvent.addExtendedProperty(
+                                    "private:http://emclient.com/ns/#calendar",
+                                    "X-MOZ-SNOOZE-TIME:" + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
+                        }
+                    }
+                }
+                Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): emclient's X-MOZ-SNOOZE-TIME added or updated to: " + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
             }
-            cur.close();
-            if (!emclient_moz_snooze_found) {
-                if (emcli_prop_id!=-1L) {
-                    // [MB] implementing addMultilinePropertyValue() would do, but I prefer to play it safe in case earlier code missed that it is there
-                    String v=addOrUpdateMultilinePropertyValue(emcli_prop_val, "X-MOZ-SNOOZE-TIME", ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
-                    if (!TEST_ONLY)
-                        calendarEvent.updateExtendedProperty(emcli_prop_id, v);
-                }
-                else {
-                    if (!TEST_ONLY)
-                        calendarEvent.addExtendedProperty(
-                                "private:http://emclient.com/ns/#calendar",
-                                "X-MOZ-SNOOZE-TIME:" + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
-                }
-            }
-            Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): emclient's X-MOZ-SNOOZE-TIME added or updated to: " + ISO8601Utilities.formatDateTimeCompact(millisToDate(notifTSMillis)));
             Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): done setting some test properties for Google Calendar, for calendarEvent with title "+ calendarEvent.getTitle());
 
             Log.v("MYCALENDAR", "in snoozeCalDAVEventReminders(): setting X-MOZ-SNOOZE-TIME to " + dtStr);
@@ -916,7 +920,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     main_snooze = max(main_snooze, dateToSeconds(dt));
                 }
             }
-            else if (n.equals("private:http://emclient.com/ns/#calendar")) {
+            else if (ExtendedCalendars.USE_EMCLIENT_ENTRIES && n.equals("private:http://emclient.com/ns/#calendar")) {
                 String v2=readFromMultilinePropertyValue(v.toString(), "X-MOZ-SNOOZE-TIME", "");
                 Log.v("MYCALENDAR", "received from readFromMultilinePropertyValue() for event_id=" + eventId + ": "+v2);
                 if (!v2.equals("")) {
@@ -1078,18 +1082,31 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             //       The iterator also has a fastForward() method that may be useful.
             RecurrenceRuleIterator it = rule.iterator(start);
 
-            DateTime ff=new DateTime(((long)r.ack)*1000L);
-            it.fastForward(ff);
-            //Log.w("MYCALENDAR","refDate calc; ff to TS="+((long)r.ack)*1000L);
+            if (r.absoluteTS!=-1L) {
+                DateTime ff = new DateTime(((long) r.ack) * 1000L);
+                it.fastForward(ff);
+                //Log.w("MYCALENDAR","refDate calc; ff to TS="+((long)r.ack)*1000L);
+            }
 
-            long secondsTS;
+            long bestBeginVal = -1L; // best value found so far -- for absolute reminders
             while (it.hasNext()) {
+                long secondsTS;
                 DateTime dt=it.nextDateTime();
                 secondsTS=dt.getTimestamp()/1000L;
                 //Log.w("MYCALENDAR","refDate calc; considering TS (sec)="+secondsTS);
-                if (secondsTS - r.minutes*60 > r.ack)
+
+                if (r.absoluteTS!=-1L && (secondsTS <= r.ack || (r.ack==-1 && secondsTS <= r.absoluteTS))) {
+                    // ASSUMPTION: r.absoluteTS < r.ack
+                    // ASSUMPTION: the records returned by it.hasNext() are monotonically increasing w.r.t. time stamp
+                    // see getFirstActiveInstance() for a discussion on how absolute reminders are handled
+                    bestBeginVal=secondsTS;
+                }
+                else if (r.absoluteTS==-1L && secondsTS - r.minutes*60 > r.ack)
                     return(secondsToDate(secondsTS));
             }
+
+            if (bestBeginVal!=-1L)
+                return(secondsToDate(bestBeginVal));
         }
         catch (InvalidRecurrenceRuleException x) {
             //Log.w("MYCALENDAR","Invalid recurrence rule!!");
@@ -1112,7 +1129,11 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
 // Specify the date range you want to search for recurring
 // event instances
         // Use Long.MIN_VALUE for -inf
-        long startMillis = max(Long.MIN_VALUE,((long)r.ack)*1000L);
+        long startMillis;
+        if (r.absoluteTS==-1L)
+            startMillis = max(Long.MIN_VALUE,((long)r.ack)*1000L); // relative reminder
+        else
+            startMillis = Long.MIN_VALUE; // for absolute reminders, we need to find the occurrence BEFORE r.ack, so there is no cheap way to set startMillis
         long endMillis = Long.MAX_VALUE; // end date
 
         Cursor cur;
@@ -1135,6 +1156,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                 selectionArgs,
                 null);
 
+        long bestBeginVal = -1L; // best value found so far -- for absolute reminders
         while (cur.moveToNext()) {
             //long eventID = 0;
             long beginVal = 0;
@@ -1143,10 +1165,22 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             //eventID = cur.getLong(PROJECTION_ID_INDEX);
             beginVal = cur.getLong(PROJECTION_BEGIN_INDEX);
 
-            if ((beginVal/1000L) - r.minutes*60 > r.ack) {
+            if (r.absoluteTS!=-1L && ((beginVal/1000L) <= r.ack || (r.ack==-1 && (beginVal/1000L) <= r.absoluteTS))) {
+                // ASSUMPTION: r.absoluteTS < r.ack
+                // ASSUMPTION: the records returned by cur.moveToNext() are monotonically increasing w.r.t. time stamp
+                // If this is an absolute reminder, then the active instance is the latest one before the user acknowledged the reminder
+                // If the user never acknowledged the reminder (I doubt it's ever the case with absolute reminders!),
+                // then the active instance is the latest one before the absolute reminder's time
+                bestBeginVal=beginVal;
+            }
+            else if (r.absoluteTS==-1L && (beginVal/1000L) - r.minutes*60 > r.ack) {
                 return(millisToDate(beginVal));
             }
         }
+
+        if (bestBeginVal!=-1L)
+            return(millisToDate(bestBeginVal));
+
         return(null);
     }
 
@@ -1166,7 +1200,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
     boolean isForcedDisplayEvent(String title) {
         String[] prefixes=new String[] {
                 "Test ",
-                "Contact Ivan",
+/*                "Contact Ivan",
                 "AskLab 1",
                 "Call Modern Ext.",
                 "ITAC Meeting",
@@ -1194,7 +1228,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                 "Ly's paper",
                 "Chiamata",
                 "Tufts: papers, ",
-
+*/
         };
 
         for (String p : prefixes) {

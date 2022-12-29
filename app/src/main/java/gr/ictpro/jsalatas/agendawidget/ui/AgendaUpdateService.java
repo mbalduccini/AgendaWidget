@@ -26,6 +26,7 @@ import android.provider.CalendarContract;
 import android.support.annotation.Nullable;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
+import android.support.v4.content.LocalBroadcastManager;
 import android.text.SpannableString;
 import android.util.Log;
 import android.view.View;
@@ -176,6 +177,8 @@ public class AgendaUpdateService extends Service {
     List<Long> notifiedEventIDs = new ArrayList<>();
 
     public final static int appWidgetId = 1;
+    public final static String EVENTS_UPDATED_BROADCAST = AgendaUpdateService.class.getName() + "EventsUpdated";
+    public final static String BROADCAST_EXTRA = "extraStringData";
 
     boolean updateInProgress = false;
 
@@ -261,6 +264,26 @@ public class AgendaUpdateService extends Service {
         }
     }
 
+    private void sendBroadcastMessage(String msg) {
+        sendBroadcastMessage(msg,"");
+    }
+
+    private void sendBroadcastMessage(String msg,String extra) {
+        Log.v("MYCALENDAR", "sending broadcast "+msg+"; extra="+extra);
+        Intent intent = new Intent(msg);
+        intent.putExtra(BROADCAST_EXTRA, extra);
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
+    }
+
+    public void handleDismiss(Context context, ExtendedCalendarEvent event) {
+        Log.v("MYCALENDAR", "in handleDismiss(); id=" + event.getId());
+        ExtendedCalendars.dismissCalDAVEventReminders(event);
+        // TODO just call updateNotifications() after the refresh instead of using removeNotification()
+        removeNotification(context, event.getId());
+        refreshOneEvent(appWidgetId, event.getId());
+        sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
+    }
+
     public void handleSnooze(Context context, ExtendedCalendarEvent event) {
 
         // The code below is a combination of:
@@ -324,14 +347,10 @@ public class AgendaUpdateService extends Service {
 
                 long snoozeMinutes = ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]);
                 ExtendedCalendars.snoozeCalDAVEventReminders(event, snoozeMinutes);
+                // TODO just call updateNotifications() after the refresh instead of using removeNotification()
                 removeNotification(context, event.getId());
-                // TODO: find a way to update the app's main window from here. Probably an intent?
-                                /*
-                                synchronized (this) {
-                                    events = refreshOneEvent(appWidgetId, event.getId(), events);
-                                    refreshListCached();
-                                }
-                                */
+                refreshOneEvent(appWidgetId, event.getId());
+                sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
             }
         });
         alertDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);//.TYPE_SYSTEM_ALERT);
@@ -381,19 +400,6 @@ public class AgendaUpdateService extends Service {
     // TODO make this private again. To do that, I need to expose handleSnooze() so that MainActivity can get to it
     public final BroadcastReceiver br2 = new
             BroadcastReceiver() {
-                void handleDismiss(Context context, ExtendedCalendarEvent event) {
-                    Log.v("MYCALENDAR", "in handleDismiss(); id=" + event.getId());
-                    ExtendedCalendars.dismissCalDAVEventReminders(event);
-                    removeNotification(context, event.getId());
-                    // TODO: find a way to update the app's main window from here. Probably an intent?
-                        /*
-                                synchronized (this) {
-                                    events = refreshOneEvent(appWidgetId, event.getId(), events);
-                                    refreshListCached();
-                                }
-                        */
-                }
-
                 ExtendedCalendarEvent eventFromIntent(Intent intent) {
                     int id = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1);
                     if (id == -1) return (null);
@@ -533,15 +539,17 @@ public class AgendaUpdateService extends Service {
                 new Timer().scheduleAtFixedRate(new TimerTask() {
                     @Override
                     public void run() {
+                        Log.v("MYCALENDAR", "in updateNotifications/Broadcast loop");
                         updateNotifications(context);
                     }
-                }, 0, (60L * 1000L)); // every 1 min
+                }, (60L * 1000L), (60L * 1000L)); // every 1 min
 //            }
 //        };
 //        mainThread.run();
     }
 
     // TODO remove
+    /*
     private void setupServiceFULL(Intent intent, int flags, int startId) {
         Context context = this; //AgendaWidgetApplication.getContext();
         Thread mainThread = new Thread() {
@@ -586,30 +594,27 @@ public class AgendaUpdateService extends Service {
             }
         }
 
-        getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+        getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false,observer);//true, observer);
 
-        /*
-        TEMPORARY ATTEMPT WITH PERMANENT BROADCASTRECEIVER
-         */
+        //TEMPORARY ATTEMPT WITH PERMANENT BROADCASTRECEIVER
         if (NEW_INTENTS) {
             Log.v("MYCALENDAR", "Registering receiver br2!!!");
             registerReceiver(br2, intentFilter2);
         }
-        /*===*/
 
         refreshList(context);
         // refresh the notifications at every minute
-        // TODO: to avoid waking up the service unnecessarily, it would be better to schedule the next notification update based on the event that will be triggered first
         new Timer().scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 updateNotifications(context);
             }
-        }, 0, (60L * 1000L)); // every 1 min
+        }, (60L*1000L), (60L * 1000L)); // every 1 min
             }
         };
         mainThread.run();
     }
+    */
 
     /*
     @Override
@@ -896,6 +901,8 @@ public class AgendaUpdateService extends Service {
 
 
     public void updateNotifications(Context context) {
+        boolean changed=false;
+
         synchronized(mainSyncObject) {
             if (updateInProgress) {
                 Log.w("MYCALENDAR", "updateNotifications(): update already in progress; ignoring the additional updateNotifications request");
@@ -918,10 +925,20 @@ public class AgendaUpdateService extends Service {
                 }
             }
         }
+
+        // See if we have any new notifications
+        for(Long eventId : newNotifications) {
+            if (!currentNotifications.contains(eventId)) {
+                changed=true;
+                break;
+            }
+        }
+
         // Remove all leftover notifications
         for(Long eventId : currentNotifications) {
             if (!newNotifications.contains(eventId)) {
                 removeNotification(context,eventId.longValue());
+                changed=true;
             }
         }
         currentNotifications=new ArrayList<>(newNotifications);
@@ -937,6 +954,9 @@ public class AgendaUpdateService extends Service {
         synchronized(mainSyncObject) {
             updateInProgress = false;
         }
+
+        if (changed)
+            sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
     }
 
     int numTriggeredEvents() {
@@ -1044,7 +1064,7 @@ public class AgendaUpdateService extends Service {
         try {
             unregisterReceiver(agendaChangedReceiver);
             if (NEW_INTENTS) {
-                registerReceiver(br2, intentFilter2);
+                unregisterReceiver(br2); //, intentFilter2);
             }
         } catch (IllegalArgumentException e) {
             // java.lang.IllegalArgumentException: Receiver not registered: gr.ictpro.jsalatas.agendawidget.ui.AgendaWidget$AgendaUpdateService

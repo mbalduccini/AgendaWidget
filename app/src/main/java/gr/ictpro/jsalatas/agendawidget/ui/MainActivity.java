@@ -8,6 +8,7 @@ import android.content.ComponentName;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -21,6 +22,7 @@ import android.provider.CalendarContract;
 import android.support.annotation.ColorInt;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.text.SpannableString;
 import android.text.style.StyleSpan;
@@ -35,6 +37,7 @@ import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -326,12 +329,15 @@ public class MainActivity extends AppCompatActivity {
 
                         if (item instanceof ExtendedCalendarEvent) {
                             mServer.handleSnooze(context, (ExtendedCalendarEvent)item);
+                            // The following lines are no longer needed. The service takes care of everything
+                            /*
                             mServer.removeNotification(context,((ExtendedCalendarEvent) item).getId());
                             synchronized(this) {
                                 //mServer.getEvents() = ExtendedCalendars.refreshOneEvent(AgendaUpdateService.appWidgetId, ((ExtendedCalendarEvent) item).getId(), mServer.getEvents());
                                 mServer.refreshOneEvent(AgendaUpdateService.appWidgetId, ((ExtendedCalendarEvent) item).getId());
                                 refreshListCached();
                             }
+                            */
                         }
                     }
                 });
@@ -344,6 +350,9 @@ public class MainActivity extends AppCompatActivity {
                         EventItem item = mServer.getEvents().get(position);
 
                         if (item instanceof ExtendedCalendarEvent) {
+                            mServer.handleDismiss(context, (ExtendedCalendarEvent)item);
+                            // The following lines are no longer needed. The service takes care of everything
+                            /*
                             ExtendedCalendars.dismissCalDAVEventReminders(item);
                             //events.remove(position);
                             mServer.removeNotification(context,((ExtendedCalendarEvent) item).getId());
@@ -352,6 +361,7 @@ public class MainActivity extends AppCompatActivity {
                                 mServer.refreshOneEvent(AgendaUpdateService.appWidgetId, ((ExtendedCalendarEvent) item).getId());
                                 refreshListCached();
                             }
+                            */
                         }
                     }
                 });
@@ -559,6 +569,17 @@ public class MainActivity extends AppCompatActivity {
 
         requestOverlayPermission();
 
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+                new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        //String s = intent.getStringExtra(AgendaUpdateService.BROADCAST_EXTRA);
+                        Log.v("MYCALENDAR", "received events-updated broadcast");
+                        refreshListInUI();
+                    }
+                }, new IntentFilter(AgendaUpdateService.EVENTS_UPDATED_BROADCAST)
+        );
+
         // NO OTHER CODE HERE: starting and setting up the service as needed is done in onServiceConnected()
 
         // TODO: let's see if I can shut down the service that is stealing my broadcasts
@@ -588,6 +609,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }, 0, (60L*1000L)); // every 1 min
         */
+        Log.v("MYCALENDAR", "done with onCreate()");
     }
 
     // https://stackoverflow.com/questions/40355344/how-to-programmatically-grant-the-draw-over-other-apps-permission-in-android
@@ -688,6 +710,11 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void run() {
+                ProgressBar spinner = (ProgressBar)findViewById(R.id.spinner);
+                spinner.setVisibility(View.GONE);
+                //spinner.setVisibility(View.VISIBLE);
+
+                Log.v("MYCALENDAR", "in refreshListInUI()");
                 if (mServer==null) return;
                 String[] vals=new String[mServer.numTriggeredEvents()];
                 for(int i=0;i<vals.length;vals[i++]="");
@@ -695,10 +722,13 @@ public class MainActivity extends AppCompatActivity {
                 ListView l = findViewById(R.id.lvEvents);
                 MySimpleArrayAdapter adapter = new MySimpleArrayAdapter(context,vals);
                 l.setAdapter(adapter);
+                Log.v("MYCALENDAR", "done with refreshListInUI()");
             }
         });
     }
 
+    // TODO old, remove
+    /*
     public void refreshListCached() {
         if (mServer==null) return;
         Log.w("MYCALENDAR","got cached events: "+mServer.getEvents().size()+"; triggered="+mServer.numTriggeredEvents());
@@ -717,6 +747,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+    */
 
     public void startSettings(View view) {
         int appWidgetId=1;
@@ -781,14 +812,19 @@ public class MainActivity extends AppCompatActivity {
             if (!mServer.isRunning()) {
                 startService();
             }
-            // TODO: this is primitive. We should receive a refresh-UI intent from the service instead
+            else {
+                refreshListInUI(); // If the service is already running, let us ask it to refresh the activity window
+            }
+            Log.v("MYCALENDAR", "done with onServiceConnected()");
+            // TODO no longer needed. Remove
+/*
             new Timer().scheduleAtFixedRate(new TimerTask() {
                 @Override
                 public void run() {
-                    refreshListInUI();
+                    Log.v("MYCALENDAR", "inside dummy loop");
                 }
             }, 0, (60L*1000L)); // every 1 min
-
+ */
         }
     };
 

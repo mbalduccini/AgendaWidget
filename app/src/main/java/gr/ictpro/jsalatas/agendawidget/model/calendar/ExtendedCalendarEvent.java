@@ -288,7 +288,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
     long findExtendedPropertyJSonEncoded(String name, String value) {
         Log.v("MYCALENDAR", "in findExtendedPropertyJSonEncoded(" + name + "," + value + ")");
 
-        String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "\"";
+        String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = '" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "'";
 
         final String[] ext_projection = new String[]{
                 CalendarContract.ExtendedProperties._ID,
@@ -525,7 +525,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
 
     // Returns: -1L if no ABSOLUTE extended property was found; otherwise: the property's ID
     static long getAbsoluteExtPropID(long eventRemoteID, int method, int minutes) {
-        String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + eventRemoteID + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "\"";
+        String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + eventRemoteID + " AND " + CalendarContract.ExtendedProperties.NAME + " = '" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "'";
 
         final String[] ext_projection = new String[]{
                 CalendarContract.ExtendedProperties._ID,
@@ -563,7 +563,7 @@ public class ExtendedCalendarEvent extends CalendarEvent {
         Log.v("MYCALENDAR", "in deleteDavx5PropertiesFromGoogleCalendar(): beginning to remove davx5 properties if this is a Google Calendar");
 
         // TODO: make sure the event ID is the right one. It was different in the old code
-        String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = \"" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "\"";
+        String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID + " = " + getId() + " AND " + CalendarContract.ExtendedProperties.NAME + " = '" + EXTENDED_PROPERTIES_DEFAULT_NAMESPACE + "'";
 
         final String[] ext_projection = new String[]{
                 CalendarContract.ExtendedProperties._ID,

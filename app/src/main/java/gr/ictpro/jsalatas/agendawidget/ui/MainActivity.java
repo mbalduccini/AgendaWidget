@@ -714,6 +714,9 @@ public class MainActivity extends AppCompatActivity {
                 spinner.setVisibility(View.GONE);
                 //spinner.setVisibility(View.VISIBLE);
 
+                TextView tv1 = (TextView)findViewById(R.id.tvCurrentDate);
+                tv1.setText(mServer.numTriggeredEvents()+" reminders triggered");
+
                 Log.v("MYCALENDAR", "in refreshListInUI()");
                 if (mServer==null) return;
                 String[] vals=new String[mServer.numTriggeredEvents()];

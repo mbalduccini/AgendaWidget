@@ -205,7 +205,7 @@ public class ExtendedCalendars extends Calendars {
             }
             else {
                 Log.v("MYCALENDAR", "in updateACKandAbsoluteSnooze(): in !is_absolute branch");
-                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = '"+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"'";
                 ext_projection = new String[]{
                         CalendarContract.ExtendedProperties._ID,
                         CalendarContract.ExtendedProperties.VALUE,
@@ -533,7 +533,7 @@ public class ExtendedCalendars extends Calendars {
                 }
                 else {
                     Log.v("MYCALENDAR", "in !is_absolute branch");
-                    ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                    ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = '"+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"'";
                     ext_projection = new String[]{
                             CalendarContract.ExtendedProperties._ID,
                             CalendarContract.ExtendedProperties.VALUE,
@@ -727,7 +727,7 @@ public class ExtendedCalendars extends Calendars {
 
                 // For all other reminders (either relative or absolute but still running)
                 // update the properties
-                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                ext_selection = CalendarContract.ExtendedProperties.EVENT_ID +" = " + calendarEvent.getId() + " AND "+ CalendarContract.ExtendedProperties.NAME +" = '"+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"'";
                 ext_projection = new String[]{
                         CalendarContract.ExtendedProperties._ID,
                         CalendarContract.ExtendedProperties.VALUE,
@@ -954,7 +954,8 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                 int type = (method == CalendarContract.Reminders.METHOD_EMAIL)? ExtendedCalendarEvent.Reminder.REMINDER_EMAIL : ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION;
 
                 // TODO: see if I can avoid this extra lookup into ExtendedProperties, since I have already fetched the values before
-                String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId+" AND "+CalendarContract.ExtendedProperties.NAME+" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                //String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId+" AND "+CalendarContract.ExtendedProperties.NAME+" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
+                String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId+" AND "+CalendarContract.ExtendedProperties.NAME+" = '"+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"'";
                 final String[] ext_projection = new String[]{
                         CalendarContract.ExtendedProperties.VALUE
                 };

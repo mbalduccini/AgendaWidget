@@ -479,8 +479,9 @@ public class AgendaUpdateService extends Service {
 
     private void setupService(Intent intent, int flags, int startId) {
         Context context = this; //AgendaWidgetApplication.getContext();
-//        Thread mainThread = new Thread() {
-//            public void run() {
+        // TODO: check if using this thread really helps with Application-Not-Responding (ANR) errors
+        Thread mainThread = new Thread() {
+            public void run() {
                 observer = new AgendaUpdateService.CalendarObserver("", new Handler());
                 intentFilter = new IntentFilter();
                 intentFilter.addAction(Intent.ACTION_TIME_TICK);
@@ -543,9 +544,9 @@ public class AgendaUpdateService extends Service {
                         updateNotifications(context);
                     }
                 }, (60L * 1000L), (60L * 1000L)); // every 1 min
-//            }
-//        };
-//        mainThread.run();
+            }
+        };
+        mainThread.run();
     }
 
     // TODO remove

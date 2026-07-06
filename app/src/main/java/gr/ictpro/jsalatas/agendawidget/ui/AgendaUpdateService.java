@@ -734,10 +734,14 @@ public class AgendaUpdateService extends Service {
     int generateNotificationId(long eventId) {
         synchronized(notifiedEventIDs) {
             int firstEmpty = -1;
-            while (notifiedEventIDs.size() < FIRST_EVENT_NOTIFICATION_ID) {
+            int firstStaleId = FIRST_EVENT_NOTIFICATION_ID + MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS;
+            while (notifiedEventIDs.size() < firstStaleId) {
                 notifiedEventIDs.add(null);
             }
-            for (int i = FIRST_EVENT_NOTIFICATION_ID; i < notifiedEventIDs.size(); i++) {
+            for (int i = firstStaleId; i < notifiedEventIDs.size(); i++) {
+                notifiedEventIDs.set(i, null);
+            }
+            for (int i = FIRST_EVENT_NOTIFICATION_ID; i < firstStaleId; i++) {
                 if (notifiedEventIDs.get(i) == null) {
                     if (firstEmpty==-1) firstEmpty = i;
                 }
@@ -746,8 +750,7 @@ public class AgendaUpdateService extends Service {
                 }
             }
             if (firstEmpty == -1) {
-                firstEmpty = notifiedEventIDs.size();
-                notifiedEventIDs.add(null);
+                firstEmpty = FIRST_EVENT_NOTIFICATION_ID;
             }
             notifiedEventIDs.set(firstEmpty, eventId);
             return (firstEmpty);
@@ -1019,6 +1022,11 @@ public class AgendaUpdateService extends Service {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
         NotificationManager platformNotificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         int firstStaleId = FIRST_EVENT_NOTIFICATION_ID + MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS;
+        synchronized(notifiedEventIDs) {
+            for (int id = firstStaleId; id < notifiedEventIDs.size(); id++) {
+                notifiedEventIDs.set(id, null);
+            }
+        }
         for (int id = firstStaleId; id <= MAX_STALE_NOTIFICATION_ID_TO_CLEAN; id++) {
             notificationManager.cancel(id);
             if (platformNotificationManager != null) {

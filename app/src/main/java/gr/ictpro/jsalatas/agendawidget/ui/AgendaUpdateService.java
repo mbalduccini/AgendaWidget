@@ -148,7 +148,7 @@ public class AgendaUpdateService extends Service {
     public final static String ACTION_VIEW = "view";
     public final static String ACTION_SNOOZE = "snooze";
     public final static String ACTION_DISMISS = "dismiss";
-    private final static String ACTION_UPDATE = "gr.ictpro.jsalatas.agendawidget.action.UPDATE";
+    public final static String ACTION_UPDATE = "gr.ictpro.jsalatas.agendawidget.action.UPDATE";
 
     final static String NOTIFICATION_CHANNEL_ID = "AgendaWidget Notification Channel";
     final static String SERV_NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID; //"Fg Service Notification Channel";
@@ -188,6 +188,8 @@ public class AgendaUpdateService extends Service {
     private Object mainSyncObject = new Object();
 
     boolean serviceRunning = false;
+    private Timer notificationTimer;
+    private Timer taskObserverRefreshTimer;
 
     private static class NotificationDetails {
         final String title;
@@ -565,7 +567,8 @@ public class AgendaUpdateService extends Service {
                 refreshList(context);
                 // refresh the notifications at every minute
                 // TODO: to avoid waking up the service unnecessarily, it would be better to schedule the next notification update based on the event that will be triggered first
-                new Timer().scheduleAtFixedRate(new TimerTask() {
+                notificationTimer = new Timer();
+                notificationTimer.scheduleAtFixedRate(new TimerTask() {
                     @Override
                     public void run() {
                         Log.v("MYCALENDAR", "in updateNotifications/Broadcast loop");
@@ -656,7 +659,17 @@ public class AgendaUpdateService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.v("MYCALENDAR","Service started");
+        boolean wasRunning = serviceRunning;
         serviceRunning=true;
+
+        if (wasRunning) {
+            if (intent != null && ACTION_UPDATE.equals(intent.getAction())) {
+                clearObserverTimer();
+                refreshList(this);
+            }
+            return START_STICKY;
+        }
+
         if (PERSISTENT_NOTIFICATION) {
             createNotificationChannel(this,NOTIFICATION_CHANNEL_ID);
             createNotificationChannel(this,SERV_NOTIFICATION_CHANNEL_ID);
@@ -679,7 +692,8 @@ public class AgendaUpdateService extends Service {
 //                refreshListInUI();
 
         // TODO had to put it in a timer. If it's not delayed, it causes an exception because startForeground() was not called in time
-        new Timer().schedule(new TimerTask() {
+        taskObserverRefreshTimer = new Timer();
+        taskObserverRefreshTimer.schedule(new TimerTask() {
             @Override
             public void run() {
                 // TODO: see if it's correct to call this one here. I don't think the widget does it
@@ -1103,9 +1117,16 @@ public class AgendaUpdateService extends Service {
 
     @Override
     public void onDestroy() {
-        super.onDestroy();
-
         Log.v("MYCALENDAR", "in destroy of SERVICE!!!");
+        serviceRunning = false;
+        if (notificationTimer != null) {
+            notificationTimer.cancel();
+            notificationTimer = null;
+        }
+        if (taskObserverRefreshTimer != null) {
+            taskObserverRefreshTimer.cancel();
+            taskObserverRefreshTimer = null;
+        }
         try {
             unregisterReceiver(agendaChangedReceiver);
             if (NEW_INTENTS) {
@@ -1115,10 +1136,14 @@ public class AgendaUpdateService extends Service {
             // java.lang.IllegalArgumentException: Receiver not registered: gr.ictpro.jsalatas.agendawidget.ui.AgendaWidget$AgendaUpdateService
             // do nothing
         }
-        for (AgendaWidget.TaskObserver taskObserver : taskObservers) {
-            getContentResolver().unregisterContentObserver(taskObserver);
+        if (taskObservers != null) {
+            for (AgendaWidget.TaskObserver taskObserver : taskObservers) {
+                getContentResolver().unregisterContentObserver(taskObserver);
+            }
         }
-        getContentResolver().unregisterContentObserver(observer);
+        if (observer != null) {
+            getContentResolver().unregisterContentObserver(observer);
+        }
         getContentResolver().unregisterContentObserver(calendarObserver);
         super.onDestroy();
     }
@@ -1140,7 +1165,9 @@ public class AgendaUpdateService extends Service {
     }
 
     public void clearObserverTimer() {
-        observer.clearTimer();
+        if (observer != null) {
+            observer.clearTimer();
+        }
     }
 
     public List<EventItem> getEvents() {

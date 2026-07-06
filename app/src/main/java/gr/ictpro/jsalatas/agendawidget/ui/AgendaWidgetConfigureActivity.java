@@ -132,6 +132,9 @@ public class AgendaWidgetConfigureActivity extends AppCompatActivity {
                 }
 
                 sendBroadcast(intent);
+                Intent serviceIntent = new Intent(this, AgendaUpdateService.class);
+                serviceIntent.setAction(AgendaUpdateService.ACTION_UPDATE);
+                startService(serviceIntent);
 
                 // create the return intent
                 Intent resultValue = new Intent();

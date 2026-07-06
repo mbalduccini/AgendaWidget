@@ -545,7 +545,13 @@ public class AgendaUpdateService extends Service {
                     }
                 }
 
-                getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+                try {
+                    getContentResolver().registerContentObserver(CalendarContract.Calendars.CONTENT_URI, false/*true*/, observer);
+                } catch (SecurityException e) {
+                    Log.e("MYCALENDAR", "Calendar permission is missing; not registering calendar observer", e);
+                    Toast toast = Toast.makeText(context, context.getString(R.string.select_calendars), Toast.LENGTH_LONG);
+                    toast.show();
+                }
 
         /*
         TEMPORARY ATTEMPT WITH PERMANENT BROADCASTRECEIVER

@@ -1,8 +1,10 @@
 package gr.ictpro.jsalatas.agendawidget.ui;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.Notification;
 import android.appwidget.AppWidgetManager;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentUris;
@@ -10,6 +12,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -65,6 +68,8 @@ import static java.lang.Integer.min;
 
 public class MainActivity extends AppCompatActivity {
     private Context context;
+
+    private static final int REQUEST_CALENDAR_PERMISSIONS = 1001;
 
     private static final String ACTION_FORCE_UPDATE = "gr.ictpro.jsalatas.agendawidget.action.FORCE_UPDATE";
     private static final String ACTION_PROVIDER_REMOVED = "gr.ictpro.jsalatas.agendawidget.action.PROVIDER_REMOVED";
@@ -567,7 +572,9 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        requestOverlayPermission();
+        if (!requestCalendarPermissionsIfNeeded()) {
+            requestOverlayPermission();
+        }
 
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 new BroadcastReceiver() {
@@ -617,10 +624,22 @@ public class MainActivity extends AppCompatActivity {
     private void requestOverlayPermission() {
         if (android.provider.Settings.canDrawOverlays(this)) return;
 
-        // TODO transition app to androix so I can use Snackbar
-        Uri uri = Uri.parse("package:" + BuildConfig.APPLICATION_ID);
-        Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri);
-        startActivity(intent);
+        try {
+            Uri uri = Uri.parse("package:" + getPackageName());
+            Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri);
+            startActivity(intent);
+        } catch (ActivityNotFoundException ex) {
+            try {
+                Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+                startActivity(intent);
+            } catch (Exception fallbackEx) {
+                Log.e("MYCALENDAR", "Unable to open overlay permission settings", fallbackEx);
+                Toast.makeText(this, "Unable to open overlay permission settings", Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception ex) {
+            Log.e("MYCALENDAR", "Unable to open overlay permission settings", ex);
+            Toast.makeText(this, "Unable to open overlay permission settings", Toast.LENGTH_LONG).show();
+        }
 
         /*
         Snackbar.make(findViewById(android.R.id.content), "Permission needed!", Snackbar.LENGTH_INDEFINITE)
@@ -641,6 +660,36 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .show();
          */
+    }
+
+    private boolean hasCalendarPermissions() {
+        return checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean requestCalendarPermissionsIfNeeded() {
+        if (hasCalendarPermissions()) return false;
+
+        requestPermissions(
+                new String[]{Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR},
+                REQUEST_CALENDAR_PERMISSIONS);
+        return true;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode != REQUEST_CALENDAR_PERMISSIONS) return;
+
+        if (hasCalendarPermissions()) {
+            requestOverlayPermission();
+            if (mServer != null && !mServer.isRunning()) {
+                startService();
+            }
+        } else {
+            Toast.makeText(this, getString(R.string.select_calendars), Toast.LENGTH_LONG).show();
+        }
     }
 
     // https://stackoverflow.com/questions/39256501/check-if-battery-optimization-is-enabled-or-not-for-an-app
@@ -811,6 +860,12 @@ public class MainActivity extends AppCompatActivity {
             mBounded = true;
             AgendaUpdateService.LocalBinder mLocalBinder = (AgendaUpdateService.LocalBinder)service;
             mServer = mLocalBinder.getServerInstance();
+
+            if (!hasCalendarPermissions()) {
+                requestCalendarPermissionsIfNeeded();
+                Log.v("MYCALENDAR", "Calendar permissions are missing; waiting before starting service");
+                return;
+            }
 
             if (!mServer.isRunning()) {
                 startService();

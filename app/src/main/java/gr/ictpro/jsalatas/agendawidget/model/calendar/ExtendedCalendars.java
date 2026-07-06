@@ -30,7 +30,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.GregorianCalendar;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TimeZone;
 
 import gr.ictpro.jsalatas.agendawidget.R;
@@ -831,13 +833,136 @@ public class ExtendedCalendars extends Calendars {
 class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
     /* parameters for debugging */
     final static boolean useDateRange=false; // only fetch events from the given date range
+    final static int BULK_QUERY_CHUNK_SIZE=400;
 
     // Events that will get triggered in the future within this number of minutes
     // will be returned by fetchCalendarEvents()
     int LOOKAHEAD_MINUTES;
+    private Map<Long, List<RawExtendedProperty>> extendedPropertiesByEventId = new HashMap<>();
+    private Map<Long, List<RawReminder>> remindersByEventId = new HashMap<>();
 
     public ExtendedCalendarFetchAdapter(int LOOKAHEAD_MINUTES) {
         this.LOOKAHEAD_MINUTES=LOOKAHEAD_MINUTES;
+    }
+
+    static class RawExtendedProperty {
+        final long eventId;
+        final String name;
+        final String value;
+
+        RawExtendedProperty(long eventId, String name, String value) {
+            this.eventId = eventId;
+            this.name = name;
+            this.value = value;
+        }
+    }
+
+    static class RawReminder {
+        final int minutes;
+        final int method;
+
+        RawReminder(int minutes, int method) {
+            this.minutes = minutes;
+            this.method = method;
+        }
+    }
+
+    static class EventRecord {
+        long id;
+        @ColorInt int color;
+        String title;
+        String location;
+        String description;
+        String eventTimezone;
+        long startMillis;
+        String endTimezone;
+        long endMillis;
+        boolean allDay;
+        String duration;
+        String exdate;
+        String rrule;
+        String originalId;
+        long originalInstanceTime;
+        String calendarTimezone;
+        int deleted;
+        int hasAlarm;
+        int calendarId;
+    }
+
+    private String eventIdInSelection(String eventIdColumn, List<Long> eventIds, int start, int end) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(eventIdColumn).append(" IN (");
+        for (int i=start; i<end; i++) {
+            if (i>start) sb.append(",");
+            sb.append(eventIds.get(i));
+        }
+        sb.append(")");
+        return(sb.toString());
+    }
+
+    private <T> void appendToMap(Map<Long, List<T>> map, long eventId, T value) {
+        List<T> values = map.get(eventId);
+        if (values == null) {
+            values = new ArrayList<>();
+            map.put(eventId, values);
+        }
+        values.add(value);
+    }
+
+    private void loadReminderData(ContentResolver cr, List<Long> eventIds) {
+        extendedPropertiesByEventId = new HashMap<>();
+        remindersByEventId = new HashMap<>();
+        if (eventIds.isEmpty()) return;
+
+        final String[] extendedPropertiesProjection = new String[]{
+                CalendarContract.ExtendedProperties.EVENT_ID,
+                CalendarContract.ExtendedProperties.NAME,
+                CalendarContract.ExtendedProperties.VALUE,
+        };
+        final String[] remindersProjection = new String[]{
+                CalendarContract.Reminders.EVENT_ID,
+                CalendarContract.Reminders.MINUTES,
+                CalendarContract.Reminders.METHOD,
+        };
+
+        int extPropRows = 0;
+        int reminderRows = 0;
+        for (int start=0; start<eventIds.size(); start+=BULK_QUERY_CHUNK_SIZE) {
+            int end = min(start + BULK_QUERY_CHUNK_SIZE, eventIds.size());
+            String selection = eventIdInSelection(CalendarContract.ExtendedProperties.EVENT_ID, eventIds, start, end);
+
+            Cursor cur = cr.query(CalendarContract.ExtendedProperties.CONTENT_URI,
+                    extendedPropertiesProjection,
+                    selection,
+                    null,
+                    null);
+            if (cur != null) {
+                while (cur.moveToNext()) {
+                    long eventId = cur.getLong(0);
+                    appendToMap(extendedPropertiesByEventId, eventId,
+                            new RawExtendedProperty(eventId, cur.getString(1), cur.getString(2)));
+                    extPropRows++;
+                }
+                cur.close();
+            }
+
+            selection = eventIdInSelection(CalendarContract.Reminders.EVENT_ID, eventIds, start, end);
+            cur = cr.query(CalendarContract.Reminders.CONTENT_URI,
+                    remindersProjection,
+                    selection,
+                    null,
+                    null);
+            if (cur != null) {
+                while (cur.moveToNext()) {
+                    long eventId = cur.getLong(0);
+                    appendToMap(remindersByEventId, eventId,
+                            new RawReminder(cur.getInt(1), cur.getInt(2)));
+                    reminderRows++;
+                }
+                cur.close();
+            }
+        }
+        Log.w("MYCALENDAR", "bulk-loaded reminder data for events=" + eventIds.size() + "; extProps=" + extPropRows + "; reminders=" + reminderRows);
     }
 
     String readFromMultilinePropertyValue(String blob,String key,String defaultValue) {
@@ -855,41 +980,20 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
 
     List<ExtendedCalendarEvent.Reminder> getCalDAVEventReminders(long eventId, int calendarId, Date startDate, String title) {
         List<ExtendedCalendarEvent.Reminder> reminders = new ArrayList<>();
-        Cursor cur;
         long startTS=dateToSeconds(startDate);
 
-        final String[] PROJECTION = new String[]{
-                CalendarContract.ExtendedProperties._ID,
-                CalendarContract.ExtendedProperties.EVENT_ID,
-                CalendarContract.ExtendedProperties.NAME,
-                CalendarContract.ExtendedProperties.VALUE,
-//                CalendarContract.ExtendedProperties.CALENDAR_ID,
-        };
+        List<RawExtendedProperty> extProps = extendedPropertiesByEventId.get(eventId);
+        if (extProps == null) extProps = Collections.emptyList();
 
-        ContentResolver cr = AgendaWidgetApplication.getContext().getContentResolver();
-
-        // TODO: make sure that event IDs are unique across calendars. Otherwise, find a way to search for calendarId
-        String selection=CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId;
-        Uri.Builder builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
-/*
-        cur = cr.query(builder.build(), PROJECTION, selection, null, null);
-        while (cur.moveToNext()) {
-            String n = cur.getString(2);
-            String v = cur.getString(3);
-            Log.v("MYCALENDAR", "got event ext-prop; event_id=" + eventId + "; name=" + n + "; value=" + v + "; title="+title);
-        }
-        cur.close();
-*/
         /******************************************************/
         /* [MB] process private:X-MOZ-LASTACK and X-MOZ-LASTACK */
         long main_snooze=-1L;
         long main_ack=-1L;
-        String ext_selection_ack=CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId;
         //val formatter = DateTimeFormat.forPattern("yyyyMMdd'T'HHmmss'Z'").withZoneUTC() //.withOffsetParsed()
-        cur = cr.query(builder.build(), PROJECTION, selection, null, null);
-        while (cur.moveToNext()) {
-            String n = cur.getString(2);
-            ExtString v = new ExtString(cur.getString(3));
+        for (RawExtendedProperty extProp : extProps) {
+            String n = extProp.name;
+            if (n == null) continue;
+            ExtString v = new ExtString(extProp.value == null ? "" : extProp.value);
 
             Date dt;
             if (n.equals("private:X-MOZ-LASTACK") || n.equals("X-MOZ-LASTACK")) {
@@ -932,41 +1036,26 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                 }
             }
         }
-        cur.close();
 
         Log.v("MYCALENDAR", "event_id="+eventId+": X-MOZ-LASTACK processed; main_ack="+main_ack+"; X-MOZ-SNOOZE-TIME processed; main_snooze="+main_snooze);
 
-        builder = CalendarContract.Reminders.CONTENT_URI.buildUpon();
-        final String[] PROJECTION_reminders = new String[]{
-                CalendarContract.Reminders.MINUTES,
-                CalendarContract.Reminders.METHOD
-        };
-        selection=CalendarContract.Reminders.EVENT_ID+" = "+eventId;
-
         boolean found_absolute=false;
         long max_ack=main_ack;
-        cur = cr.query(builder.build(), PROJECTION_reminders, selection, null, null);
-        while (cur.moveToNext()) {
-            int minutes = cur.getInt(0);
-            int method = cur.getInt(1);
+        List<RawReminder> rawReminders = remindersByEventId.get(eventId);
+        if (rawReminders == null) rawReminders = Collections.emptyList();
+        for (RawReminder rawReminder : rawReminders) {
+            int minutes = rawReminder.minutes;
+            int method = rawReminder.method;
             Log.v("MYCALENDAR", "got event reminder; event_id=" + eventId + "; min=" + minutes + "; method=" + method);
             if (method == CalendarContract.Reminders.METHOD_ALERT || method == CalendarContract.Reminders.METHOD_EMAIL) {
                 int type = (method == CalendarContract.Reminders.METHOD_EMAIL)? ExtendedCalendarEvent.Reminder.REMINDER_EMAIL : ExtendedCalendarEvent.Reminder.REMINDER_NOTIFICATION;
 
-                // TODO: see if I can avoid this extra lookup into ExtendedProperties, since I have already fetched the values before
-                //String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId+" AND "+CalendarContract.ExtendedProperties.NAME+" = \""+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"\"";
-                String ext_selection = CalendarContract.ExtendedProperties.EVENT_ID+" = "+eventId+" AND "+CalendarContract.ExtendedProperties.NAME+" = '"+EXTENDED_PROPERTIES_DEFAULT_NAMESPACE+"'";
-                final String[] ext_projection = new String[]{
-                        CalendarContract.ExtendedProperties.VALUE
-                };
-                Uri.Builder ext_builder = CalendarContract.ExtendedProperties.CONTENT_URI.buildUpon();
                 long ack=main_ack;
                 boolean is_absolute=false;
                 String ACK_SEP=";";
-                Cursor ext_cur = cr.query(ext_builder.build(), ext_projection, ext_selection, null, null);
-                while (ext_cur.moveToNext()) {
-                        //val n = cursor.getStringValue(ExtendedProperties.NAME)
-                    String v = ext_cur.getString(0);
+                for (RawExtendedProperty extProp : extProps) {
+                    if (!EXTENDED_PROPERTIES_DEFAULT_NAMESPACE.equals(extProp.name)) continue;
+                    String v = extProp.value == null ? "" : extProp.value;
                     // TODO: figure out if using method and minutes below is correct. In Kotlin, I was using getStringValue() but the values are ints???
                     String prefix1="[\"X-CALDAV-ANDROID-ACK\",\""+method+ACK_SEP+minutes+ACK_SEP;
                     String prefix2="[\"X-CALDAV-ANDROID-MOZACK\",\""+method+ACK_SEP+minutes+ACK_SEP;
@@ -994,7 +1083,6 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                         }
                     }
                 }
-                ext_cur.close();
                 boolean ack_is_inf=(ack==infinityDateSeconds);
                 Log.v("MYCALENDAR", "ack=" + ack + "; startTS=" + startTS + "; remind time=" + (startTS - minutes * 60) + "; is_absolute=" + is_absolute + "; ack_is_inf?" + ack_is_inf);
                 if (is_absolute && !ack_is_inf && main_snooze!=-1L) {
@@ -1323,27 +1411,58 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
         Uri.Builder builder = CalendarContract.Events.CONTENT_URI.buildUpon();
 
         Cursor cur = cr.query(builder.build(), PROJECTION, selection, null, null);
+        List<EventRecord> eventRecords = new ArrayList<>();
+        List<Long> eventIds = new ArrayList<>();
+        if (cur != null) {
+            while (cur.moveToNext()) {
+                EventRecord record = new EventRecord();
+                record.id = cur.getLong(0);
+                record.color = cur.getInt(1);
+                record.title = cur.getString(2);
+                record.location = cur.getString(3);
+                record.description = cur.getString(4);
+                record.eventTimezone = cur.getString(5);
+                record.startMillis = cur.getLong(6);
+                record.endTimezone = cur.getString(7);
+                record.endMillis = cur.getLong(8);
+                record.allDay = cur.getInt(9) == 1;
+                record.duration = cur.getString(10);
+                record.exdate = cur.getString(11);
+                record.rrule = cur.getString(12);
+                record.originalId = cur.getString(13);
+                record.originalInstanceTime = cur.getLong(14);
+                record.calendarTimezone = cur.getString(15);
+                record.deleted = cur.getInt(16);
+                record.hasAlarm = cur.getInt(17);
+                record.calendarId = cur.getInt(18);
+                eventRecords.add(record);
+                eventIds.add(record.id);
+            }
+            cur.close();
+        }
+        Log.w("MYCALENDAR","event rows fetched="+eventRecords.size());
+        loadReminderData(cr, eventIds);
 
         java.util.Calendar calendarInstance = GregorianCalendar.getInstance();
         Date now = GregorianCalendar.getInstance().getTime();
-        while (cur.moveToNext()) {
-            id = cur.getLong(0);
-            color = cur.getInt(1);
-            calendarId = cur.getInt(18);
-            title = cur.getString(2);
+        for (EventRecord record : eventRecords) {
+            id = record.id;
+            color = record.color;
+            calendarId = record.calendarId;
+            title = record.title;
             if (title==null) {
                 Log.e("MYCALENDAR","Found event with null title in calendar with ID="+calendarId+". Ignoring it");
                 continue;
             }
-            location = cur.getString(3);
-            description = cur.getString(4);
-            eventTimezone = cur.getString(5);
-            allDay = cur.getInt(9) == 1;
-            duration = cur.getString(10);
-            calendarInstance.setTimeInMillis(cur.getLong(6));
+            location = record.location;
+            description = record.description;
+            eventTimezone = record.eventTimezone;
+            allDay = record.allDay;
+            duration = record.duration;
+            calendarInstance.setTimeInMillis(record.startMillis);
             startDate = calendarInstance.getTime();
-            if (cur.getLong(8)!=0) {
-                calendarInstance.setTimeInMillis(cur.getLong(8));
+            if (record.endMillis!=0) {
+                calendarInstance.setTimeInMillis(record.endMillis);
                 endDate = calendarInstance.getTime();
             }
             else if (duration==null) {
@@ -1382,11 +1501,11 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
                     continue;
                 }
             }
-            rrule = cur.getString(12);
-            originalId = cur.getString(13);
-            originalInstanceTime = cur.getLong(14);
-            calendarTimezone = cur.getString(15);
-            hasAlarm = cur.getInt(17);
+            rrule = record.rrule;
+            originalId = record.originalId;
+            originalInstanceTime = record.originalInstanceTime;
+            calendarTimezone = record.calendarTimezone;
+            hasAlarm = record.hasAlarm;
 
             String eventTZ;
             if (eventTimezone!=null)
@@ -1411,7 +1530,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
             for(ExtendedCalendarEvent.Reminder r : reminders) {
                 Log.w("MYCALENDAR","has reminder: type="+r.type+"; minutes="+r.minutes+"; absoluteTS="+r.absoluteTS+"; ack="+r.ack);
             }
-            Log.w("MYCALENDAR","working on reminders for calendarEvent title="+title+"; allDay="+allDay+"; startDate="+startDate+"; endDate="+cur.getLong(8)+"/"+endDate+"/"+endDate.getTime()+"; rrule="+rrule+"; originalId="+originalId+"; hasAlarm="+hasAlarm+"; calendarId="+calendarId+"; eventTZ="+eventTimezone+"; calendarTZ="+ calendarTimezone+"; # reminders="+reminders.size());
+            Log.w("MYCALENDAR","working on reminders for calendarEvent title="+title+"; allDay="+allDay+"; startDate="+startDate+"; endDate="+record.endMillis+"/"+endDate+"/"+endDate.getTime()+"; rrule="+rrule+"; originalId="+originalId+"; hasAlarm="+hasAlarm+"; calendarId="+calendarId+"; eventTZ="+eventTimezone+"; calendarTZ="+ calendarTimezone+"; # reminders="+reminders.size());
 
             // testing reminders
             // assumption: no RRULE
@@ -1483,7 +1602,7 @@ class ExtendedCalendarFetchAdapter implements CalendarFetchAdapter {
 
             if (!create_notification) continue; // no need to add to the calendar
 
-            Log.w("MYCALENDAR","ADDING calendarEvent title="+title+"; allDay="+allDay+"; startDate="+startDate+"; endDate="+cur.getLong(8)+"/"+endDate+"/"+endDate.getTime()+"; duration="+duration+"; rrule="+rrule+"; originalId="+originalId+"; hasAlarm="+hasAlarm+"; calendarId="+calendarId+"; eventTZ="+eventTimezone+"; calendarTZ="+ calendarTimezone+"; # reminders="+reminders.size());
+            Log.w("MYCALENDAR","ADDING calendarEvent title="+title+"; allDay="+allDay+"; startDate="+startDate+"; endDate="+record.endMillis+"/"+endDate+"/"+endDate.getTime()+"; duration="+duration+"; rrule="+rrule+"; originalId="+originalId+"; hasAlarm="+hasAlarm+"; calendarId="+calendarId+"; eventTZ="+eventTimezone+"; calendarTZ="+ calendarTimezone+"; # reminders="+reminders.size());
 
                 /*
 
@@ -1524,8 +1643,6 @@ common branch
             }
 */
         }
-        cur.close();
-
         Log.w("MYCALENDAR","calendarEvents size="+calendarEvents.size());
 
         return(calendarEvents);

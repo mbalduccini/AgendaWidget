@@ -13,3 +13,6 @@
 [submodule "app/src/main/java/org/dmfs/jems2"]
 	path = app/src/main/java/org/dmfs/jems2
 	url = https://github.com/dmfs/jems.git
+[submodule "android-material-color-picker-dialog"]
+	path = android-material-color-picker-dialog
+	url = https://github.com/mbalduccini/android-material-color-picker-dialog.git

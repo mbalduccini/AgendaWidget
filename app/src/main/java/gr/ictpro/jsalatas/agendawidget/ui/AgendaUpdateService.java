@@ -36,7 +36,9 @@ import android.widget.NumberPicker;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -173,6 +175,7 @@ public class AgendaUpdateService extends Service {
     //BroadcastReceiver br = null;
     List<Long> currentNotifications = new ArrayList<>();
     List<Long> newNotifications = new ArrayList<>();
+    Map<Long, NotificationDetails> currentNotificationDetails = new HashMap<>();
     List<EventItem> events = new ArrayList<>();
     List<Long> notifiedEventIDs = new ArrayList<>();
 
@@ -185,6 +188,25 @@ public class AgendaUpdateService extends Service {
     private Object mainSyncObject = new Object();
 
     boolean serviceRunning = false;
+
+    private static class NotificationDetails {
+        final String title;
+        final String description;
+        final long startTime;
+
+        NotificationDetails(String title, String description, long startTime) {
+            this.title = title;
+            this.description = description;
+            this.startTime = startTime;
+        }
+
+        boolean matches(NotificationDetails other) {
+            if (other == null) return false;
+            return startTime == other.startTime
+                    && title.equals(other.title)
+                    && description.equals(other.description);
+        }
+    }
 
     public class CalendarObserver extends ContentObserver {
         String calendar;
@@ -668,7 +690,7 @@ public class AgendaUpdateService extends Service {
             int firstEmpty = -1;
             for (int i = 0; i < notifiedEventIDs.size(); i++) {
                 if (notifiedEventIDs.get(i) == null) {
-                    if (firstEmpty!=-1) firstEmpty = i;
+                    if (firstEmpty==-1) firstEmpty = i;
                 }
                 else if (notifiedEventIDs.get(i) == eventId) {
                     return (i);
@@ -912,7 +934,11 @@ public class AgendaUpdateService extends Service {
             updateInProgress = true;
         }
 
-        // Create the notifications
+        List<Long> previousNotifications = currentNotifications;
+        Map<Long, NotificationDetails> previousNotificationDetails = currentNotificationDetails;
+        Map<Long, NotificationDetails> newNotificationDetails = new HashMap<>();
+
+        // Create or update only the notifications whose content actually changed.
         newNotifications=new ArrayList<>();
         for(EventItem event : events) {
             if (event instanceof ExtendedCalendarEvent) {
@@ -921,34 +947,46 @@ public class AgendaUpdateService extends Service {
                 if (calendarEvent.isTriggered()) {
                     SpannableString spanDate = formatDate(context, calendarEvent, false); //new SpannableString(sb.toString());
                     SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
-                    createNotification(context, calendarEvent.getId(), spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime());
-                    newNotifications.add(calendarEvent.getId());
+                    long eventId = calendarEvent.getId();
+                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime());
+                    NotificationDetails previousDetails = previousNotificationDetails.get(eventId);
+                    if (!previousNotifications.contains(eventId) || !details.matches(previousDetails)) {
+                        createNotification(context, eventId, details.title, details.description, details.startTime);
+                        changed = true;
+                    }
+                    newNotifications.add(eventId);
+                    newNotificationDetails.put(eventId, details);
                 }
             }
         }
 
         // See if we have any new notifications
         for(Long eventId : newNotifications) {
-            if (!currentNotifications.contains(eventId)) {
+            if (!previousNotifications.contains(eventId)) {
                 changed=true;
                 break;
             }
         }
 
         // Remove all leftover notifications
-        for(Long eventId : currentNotifications) {
+        for(Long eventId : previousNotifications) {
             if (!newNotifications.contains(eventId)) {
                 removeNotification(context,eventId.longValue());
                 changed=true;
             }
         }
         currentNotifications=new ArrayList<>(newNotifications);
+        currentNotificationDetails = newNotificationDetails;
         if (!AgendaUpdateService.PERSISTENT_NOTIFICATION /*|| !AgendaUpdateService.PERSISTENT_NOTIFICATION_IS_SUMMARY*/) {
-            if (currentNotifications.size()>1) {
-                createSummaryNotification(context,NOTIFICATION_CHANNEL_ID);
-            }
-            else {
-                removeSummaryNotification(context);
+            boolean hadSummary = previousNotifications.size()>1;
+            boolean needsSummary = currentNotifications.size()>1;
+            if (hadSummary != needsSummary) {
+                if (needsSummary) {
+                    createSummaryNotification(context,NOTIFICATION_CHANNEL_ID);
+                }
+                else {
+                    removeSummaryNotification(context);
+                }
             }
         }
 

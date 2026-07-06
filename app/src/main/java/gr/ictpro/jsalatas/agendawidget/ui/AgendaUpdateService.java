@@ -1,6 +1,5 @@
 package gr.ictpro.jsalatas.agendawidget.ui;
 
-import android.app.AlertDialog;
 import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -26,14 +25,15 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.provider.CalendarContract;
 import android.support.annotation.Nullable;
+import android.support.v7.app.AlertDialog;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.text.SpannableString;
 import android.util.Log;
+import android.view.ContextThemeWrapper;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.NumberPicker;
 import android.widget.Toast;
 
@@ -353,7 +353,8 @@ public class AgendaUpdateService extends Service {
         context.sendBroadcast(closeIntent);
 
         // Display the snooze picker
-        View view = View.inflate(context, R.layout.time_dialog, null);
+        Context dialogContext = new ContextThemeWrapper(context, R.style.AlertDialogTheme);
+        View view = View.inflate(dialogContext, R.layout.time_dialog, null);
         final NumberPicker numberPickerAmount = view.findViewById(R.id.numpicker_amount);
         numberPickerAmount.setMinValue(1);
         numberPickerAmount.setMaxValue(99);
@@ -366,20 +367,12 @@ public class AgendaUpdateService extends Service {
         final int[] minsPerUnit = new int[]{1, 60, 60 * 24, 60 * 24 * 7};
         numberPickerUnit.setDisplayedValues(new String[]{"minutes", "hours", "days", "weeks"});
 
-        Button cancel = view.findViewById(R.id.cancel);
-        Button ok = view.findViewById(R.id.ok);
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        AlertDialog.Builder builder = new AlertDialog.Builder(dialogContext);
         builder.setView(view);
-        final AlertDialog alertDialog = builder.create();
-        cancel.setOnClickListener(new View.OnClickListener() {
+        builder.setNegativeButton("Cancel", null);
+        builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
             @Override
-            public void onClick(View v) {
-                alertDialog.dismiss();
-            }
-        });
-        ok.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
+            public void onClick(DialogInterface dialog, int which) {
                 Log.v("MYCALENDAR", "snooze picked: " + numberPickerAmount.getValue() + " in " + numberPickerUnit.getValue() + "; mins=" + ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]));
 //                        timeTV.setText(String.format("%1$d:%2$02d:%3$02d", numberPickerHour.getValue(), numberPickerMinutes.getValue(), numberPickerSeconds.getValue()));
 //                    SharedPreferences.Editor editor = sharedPreferences.edit();
@@ -387,12 +380,12 @@ public class AgendaUpdateService extends Service {
 //                    editor.putInt("Minutes", numberPickerMinutes.getValue());
 //                    editor.putInt("Seconds", numberPickerSeconds.getValue());
 //                    editor.apply();
-                alertDialog.dismiss();
 
                 long snoozeMinutes = ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]);
                 snoozeEvent(context, event, snoozeMinutes);
             }
         });
+        final AlertDialog alertDialog = builder.create();
         if (context instanceof MainActivity.SnoozeReminderActivity) {
             alertDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
                 @Override

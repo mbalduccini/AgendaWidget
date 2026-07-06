@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.service.notification.StatusBarNotification;
 import android.appwidget.AppWidgetManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -142,6 +143,11 @@ MORE CODE RELATED TO REGISTRATION OF OBSERVERS
 public class AgendaUpdateService extends Service {
     final static boolean PERSISTENT_NOTIFICATION = true;
     final static boolean PERSISTENT_NOTIFICATION_IS_SUMMARY = true;
+    final static int TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID = 0;
+    final static int FIRST_EVENT_NOTIFICATION_ID = 1;
+    final static int MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS = 3;
+    final static int MAX_STALE_NOTIFICATION_ID_TO_CLEAN = 32;
+    final static long TRIGGERED_REMINDERS_CHILD_SORT_TIME = Long.MAX_VALUE;
 
     public final static boolean NEW_INTENTS = true;// this CANNOT be false. To switch to false, find a way to re-enable the block under condition "!NEW_INTENTS" that is currently commented out
 
@@ -178,6 +184,7 @@ public class AgendaUpdateService extends Service {
     List<Long> currentNotifications = new ArrayList<>();
     List<Long> newNotifications = new ArrayList<>();
     Map<Long, NotificationDetails> currentNotificationDetails = new HashMap<>();
+    String currentSummarySignature = "";
     List<EventItem> events = new ArrayList<>();
     List<Long> notifiedEventIDs = new ArrayList<>();
 
@@ -727,7 +734,10 @@ public class AgendaUpdateService extends Service {
     int generateNotificationId(long eventId) {
         synchronized(notifiedEventIDs) {
             int firstEmpty = -1;
-            for (int i = 0; i < notifiedEventIDs.size(); i++) {
+            while (notifiedEventIDs.size() < FIRST_EVENT_NOTIFICATION_ID) {
+                notifiedEventIDs.add(null);
+            }
+            for (int i = FIRST_EVENT_NOTIFICATION_ID; i < notifiedEventIDs.size(); i++) {
                 if (notifiedEventIDs.get(i) == null) {
                     if (firstEmpty==-1) firstEmpty = i;
                 }
@@ -850,12 +860,45 @@ public class AgendaUpdateService extends Service {
                 //
                 // If alerts for a notification's group should be handled by a different notification, call setGroupAlertBehavior(). For example, if you want only the summary of your group to make noise, all children in the group should have the group alert behavior GROUP_ALERT_SUMMARY. The other options are GROUP_ALERT_ALL and GROUP_ALERT_CHILDREN.
                 //
-            builder=builder.setGroup(MY_NOTIFICATION_GROUP_ID);
+            builder=builder.setGroup(MY_NOTIFICATION_GROUP_ID)
+                    .setSortKey("1_" + startTime);
 
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
 
-        // id is a unique int for each notification that you must define
         notificationManager.notify(id, builder.build());
+    }
+
+    public void updateTriggeredRemindersChildNotification(Context appContext, List<NotificationDetails> reminderDetails) {
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
+        int reminderCount = reminderDetails == null ? 0 : reminderDetails.size();
+        if (reminderCount == 0) {
+            notificationManager.cancel(TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID);
+            return;
+        }
+
+        PackageManager pm = getPackageManager();
+        Intent launchIntent = pm.getLaunchIntentForPackage(BuildConfig.APPLICATION_ID);
+        PendingIntent tapIntent = PendingIntent.getActivity(this, 0, launchIntent, 0);
+        String title = reminderCount == 1
+                ? "1 reminder triggered"
+                : reminderCount + " reminders triggered";
+
+        Notification notification = new NotificationCompat.Builder(appContext, NOTIFICATION_CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText("Expand to view reminders")
+                .setSmallIcon(R.drawable.ic_notes)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setContentIntent(tapIntent)
+                .setWhen(TRIGGERED_REMINDERS_CHILD_SORT_TIME)
+                .setOnlyAlertOnce(true)
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setGroup(MY_NOTIFICATION_GROUP_ID)
+                .setSortKey("0")
+                .build();
+
+        notificationManager.notify(TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID, notification);
     }
 
     public Notification createSummaryNotification(Context appContext,String channel) {
@@ -863,29 +906,39 @@ public class AgendaUpdateService extends Service {
     }
 
     public Notification createSummaryNotification(Context appContext,String channel, boolean doDisplayNotification) {
+        return createSummaryNotification(appContext, channel, new ArrayList<NotificationDetails>(), doDisplayNotification);
+    }
+
+    public Notification createSummaryNotification(Context appContext, String channel, List<NotificationDetails> reminderDetails, boolean doDisplayNotification) {
         //createNotificationChannel(appContext,channel);
         //PendingIntent tapIntent=createActionIntent(appContext,0,0,ACTION_OPEN_APP);
         PackageManager pm = getPackageManager();
         Intent launchIntent = pm.getLaunchIntentForPackage(BuildConfig.APPLICATION_ID);
         PendingIntent tapIntent = PendingIntent.getActivity(this, 0, launchIntent, 0);
-        Notification summaryNotification =
+        int reminderCount = reminderDetails == null ? 0 : reminderDetails.size();
+        String title;
+        String contentText;
+        if (reminderCount == 0) {
+            title = "Reminders";
+            contentText = "No reminders triggered";
+        }
+        else if (reminderCount == 1) {
+            title = "1 reminder triggered";
+            contentText = "Expand to view the reminder";
+        }
+        else {
+            title = reminderCount + " reminders triggered";
+            contentText = "Expand to view reminders";
+        }
+
+        NotificationCompat.Builder builder =
                 new NotificationCompat.Builder(appContext, channel)
-                        .setContentTitle("Reminders")
-                        //set content text to support devices running API level < 24
-                        .setContentText("Reminders available")
+                        .setContentTitle(title)
+                        .setContentText(contentText)
                         .setSmallIcon(R.drawable.ic_notes)
-/*
-                        //build summary info into InboxStyle template
-                        .setStyle(new NotificationCompat.InboxStyle()
-                                .addLine("Alex Faarborg  Check this out")
-                                .addLine("Jeff Chang    Launch Party")
-                                .setBigContentTitle("2 new messages")
-                                .setSummaryText("janedoe@example.com"))
- */
                         .setPriority(NotificationCompat.PRIORITY_MAX)//PRIORITY_DEFAULT)
                         .setCategory(NotificationCompat.CATEGORY_EVENT)
                         .setContentIntent(tapIntent)
-                        //.setStyle(new NotificationCompat.InboxStyle())
                         // Do not trigger an alert if the notification is already showing and is updated
                         .setOnlyAlertOnce(true)
                         // Group the notifications
@@ -896,8 +949,9 @@ public class AgendaUpdateService extends Service {
                         //
                         .setGroup(MY_NOTIFICATION_GROUP_ID)
                         //set this notification as the summary for the group
-                        .setGroupSummary(true)
-                        .build();
+                        .setGroupSummary(true);
+
+        Notification summaryNotification = builder.build();
         if (doDisplayNotification) {
             NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
             notificationManager.notify(SUMMARY_NOTIFICATION_ID, summaryNotification);
@@ -961,6 +1015,70 @@ public class AgendaUpdateService extends Service {
         notificationManager.cancel(SUMMARY_NOTIFICATION_ID);
     }
 
+    private void removeStaleIndividualNotifications(Context context) {
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
+        NotificationManager platformNotificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        int firstStaleId = FIRST_EVENT_NOTIFICATION_ID + MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS;
+        for (int id = firstStaleId; id <= MAX_STALE_NOTIFICATION_ID_TO_CLEAN; id++) {
+            notificationManager.cancel(id);
+            if (platformNotificationManager != null) {
+                platformNotificationManager.cancel(id);
+            }
+        }
+    }
+
+    private List<Long> getActiveNotificationEventIds(Context context) {
+        List<Long> activeEventIds = new ArrayList<>();
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            Log.w("MYCALENDAR", "Cannot query active notifications: NotificationManager is null");
+            return null;
+        }
+
+        try {
+            StatusBarNotification[] activeNotifications = notificationManager.getActiveNotifications();
+            synchronized(notifiedEventIDs) {
+                for (StatusBarNotification activeNotification : activeNotifications) {
+                    if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                        continue;
+                    }
+
+                    int notificationId = activeNotification.getId();
+                    if (activeNotification.getTag() != null) {
+                        continue;
+                    }
+                    if (notificationId < 0 || notificationId >= notifiedEventIDs.size()) {
+                        continue;
+                    }
+
+                    Long eventId = notifiedEventIDs.get(notificationId);
+                    if (eventId != null && !activeEventIds.contains(eventId)) {
+                        activeEventIds.add(eventId);
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.w("MYCALENDAR", "Cannot query active notifications; falling back to cached notification state", e);
+            return null;
+        }
+
+        return activeEventIds;
+    }
+
+    private String buildSummarySignature(List<NotificationDetails> reminderDetails) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(reminderDetails.size());
+        for (NotificationDetails details : reminderDetails) {
+            builder.append('|')
+                    .append(details.startTime)
+                    .append('|')
+                    .append(details.description)
+                    .append('|')
+                    .append(details.title);
+        }
+        return builder.toString();
+    }
+
 
     public void updateNotifications(Context context) {
         boolean changed=false;
@@ -976,6 +1094,9 @@ public class AgendaUpdateService extends Service {
         List<Long> previousNotifications = currentNotifications;
         Map<Long, NotificationDetails> previousNotificationDetails = currentNotificationDetails;
         Map<Long, NotificationDetails> newNotificationDetails = new HashMap<>();
+        List<Long> activeNotificationEvents = getActiveNotificationEventIds(context);
+        List<NotificationDetails> triggeredReminderDetails = new ArrayList<>();
+        removeStaleIndividualNotifications(context);
 
         // Create or update only the notifications whose content actually changed.
         newNotifications=new ArrayList<>();
@@ -989,12 +1110,17 @@ public class AgendaUpdateService extends Service {
                     long eventId = calendarEvent.getId();
                     NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime());
                     NotificationDetails previousDetails = previousNotificationDetails.get(eventId);
-                    if (!previousNotifications.contains(eventId) || !details.matches(previousDetails)) {
-                        createNotification(context, eventId, details.title, details.description, details.startTime);
-                        changed = true;
+                    triggeredReminderDetails.add(details);
+                    if (newNotifications.size() < MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS) {
+                        boolean isCached = previousNotifications.contains(eventId);
+                        boolean isActive = activeNotificationEvents == null || activeNotificationEvents.contains(eventId);
+                        if (!isCached || !isActive || !details.matches(previousDetails)) {
+                            createNotification(context, eventId, details.title, details.description, details.startTime);
+                            changed = true;
+                        }
+                        newNotifications.add(eventId);
+                        newNotificationDetails.put(eventId, details);
                     }
-                    newNotifications.add(eventId);
-                    newNotificationDetails.put(eventId, details);
                 }
             }
         }
@@ -1016,6 +1142,13 @@ public class AgendaUpdateService extends Service {
         }
         currentNotifications=new ArrayList<>(newNotifications);
         currentNotificationDetails = newNotificationDetails;
+        String newSummarySignature = buildSummarySignature(triggeredReminderDetails);
+        if (!newSummarySignature.equals(currentSummarySignature)) {
+            createSummaryNotification(context, NOTIFICATION_CHANNEL_ID, triggeredReminderDetails, true);
+            updateTriggeredRemindersChildNotification(context, triggeredReminderDetails);
+            currentSummarySignature = newSummarySignature;
+            changed = true;
+        }
         if (!AgendaUpdateService.PERSISTENT_NOTIFICATION /*|| !AgendaUpdateService.PERSISTENT_NOTIFICATION_IS_SUMMARY*/) {
             boolean hadSummary = previousNotifications.size()>1;
             boolean needsSummary = currentNotifications.size()>1;

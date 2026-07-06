@@ -14,7 +14,6 @@ import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
@@ -241,9 +240,7 @@ public class MainActivity extends AppCompatActivity {
                  */
                 boolean isToday=false;
 
-                @ColorInt int dateTitleColor = Color.parseColor(isToday ?
-                        Settings.getStringPref(AgendaWidgetApplication.getContext(), "todayDateTitleColor", AgendaUpdateService.appWidgetId) :
-                        Settings.getStringPref(AgendaWidgetApplication.getContext(), "dateTitleColor", AgendaUpdateService.appWidgetId));
+                @ColorInt int dateTitleColor = getResources().getColor(R.color.colorText);
 
                 //v.setInt(R.id.tvDate, "setTextColor", dateTitleColor);
                 ((TextView)v.findViewById(R.id.tvDate)).setTextColor(dateTitleColor);
@@ -261,9 +258,7 @@ public class MainActivity extends AppCompatActivity {
                 //v.setTextViewText(R.id.tvTitle, spanTitle);
                 ((TextView) v.findViewById(R.id.tvTitle)).setText(spanTitle);
 
-                @ColorInt int locationNotesColor = Color.parseColor(isToday ?
-                        Settings.getStringPref(AgendaWidgetApplication.getContext(), "todayLocationNotesColor", AgendaUpdateService.appWidgetId) :
-                        Settings.getStringPref(AgendaWidgetApplication.getContext(), "locationNotesColor", AgendaUpdateService.appWidgetId));
+                @ColorInt int locationNotesColor = getResources().getColor(R.color.colorDescriptionText);
 
                 //v.setInt(R.id.tvLocation, "setTextColor", locationNotesColor);
                 ((TextView) v.findViewById(R.id.tvLocation)).setTextColor(locationNotesColor);
@@ -370,45 +365,6 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
-                btn=((Button) v.findViewById(R.id.btn_dump));
-                btn.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        Log.w("MYCALENDAR","dump button clicked for entry #"+position);
-                        EventItem item = mServer.getEvents().get(position);
-                        if (item instanceof ExtendedCalendarEvent) {
-                            ((ExtendedCalendarEvent)item).dumpExtendedPropertiesForEvent();
-                        }
-                    }
-                });
-                btn=((Button) v.findViewById(R.id.btn_test));
-                btn.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        Toast.makeText(context, "You must set up code for the Test button!", Toast.LENGTH_LONG).show();
-                        if (1==1) return;
-
-/*
-                        if (!AgendaWidgetConfigureActivity.checkForPermission(AgendaWidgetApplication.getActivity(context), Manifest.permission.READ_CALENDAR, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_READ_CALENDAR, false)) {
-                            ActivityCompat.requestPermissions(AgendaWidgetApplication.getActivity(context), new String[]{Manifest.permission.READ_CALENDAR}, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_READ_CALENDAR);
-                            return;
-                        }
-                        if (!AgendaWidgetConfigureActivity.checkForPermission(AgendaWidgetApplication.getActivity(context), Manifest.permission.WRITE_CALENDAR, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_WRITE_CALENDAR, false)) {
-                            ActivityCompat.requestPermissions(AgendaWidgetApplication.getActivity(context), new String[]{Manifest.permission.WRITE_CALENDAR}, AgendaWidgetConfigureActivity.PERMISSIONS_REQUEST_WRITE_CALENDAR);
-                            return;
-                        }
-*/
-
-                        /*
-                        Log.w("MYCALENDAR","run-tests button clicked for entry #"+position);
-                        EventItem item = mServer.getEvents().get(position);
-                        if (item instanceof ExtendedCalendarEvent) {
-                            ((ExtendedCalendarEvent)item).runTests();
-                        }
-                        */
-                    }
-                });
-
                 /*
                 // create the notification
                 SpannableString spanDate = formatDate(appContext,calendarEvent); //new SpannableString(sb.toString());

@@ -1,6 +1,7 @@
 package gr.ictpro.jsalatas.agendawidget.ui;
 
 import android.app.AlertDialog;
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -11,6 +12,7 @@ import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentUris;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
@@ -308,6 +310,24 @@ public class AgendaUpdateService extends Service {
         sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
     }
 
+    public ExtendedCalendarEvent findCalendarEvent(long eventId) {
+        for (EventItem item : events) {
+            if (item instanceof ExtendedCalendarEvent) {
+                ExtendedCalendarEvent event = (ExtendedCalendarEvent) item;
+                if (event.getId() == eventId) return event;
+            }
+        }
+        return null;
+    }
+
+    public void snoozeEvent(Context context, ExtendedCalendarEvent event, long snoozeMinutes) {
+        ExtendedCalendars.snoozeCalDAVEventReminders(event, snoozeMinutes);
+        // TODO just call updateNotifications() after the refresh instead of using removeNotification()
+        removeNotification(context, event.getId());
+        refreshOneEvent(appWidgetId, event.getId());
+        sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
+    }
+
     public void handleSnooze(Context context, ExtendedCalendarEvent event) {
 
         // The code below is a combination of:
@@ -370,14 +390,20 @@ public class AgendaUpdateService extends Service {
                 alertDialog.dismiss();
 
                 long snoozeMinutes = ((long) numberPickerAmount.getValue()) * ((long) minsPerUnit[numberPickerUnit.getValue()]);
-                ExtendedCalendars.snoozeCalDAVEventReminders(event, snoozeMinutes);
-                // TODO just call updateNotifications() after the refresh instead of using removeNotification()
-                removeNotification(context, event.getId());
-                refreshOneEvent(appWidgetId, event.getId());
-                sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
+                snoozeEvent(context, event, snoozeMinutes);
             }
         });
-        alertDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);//.TYPE_SYSTEM_ALERT);
+        if (context instanceof MainActivity.SnoozeReminderActivity) {
+            alertDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+                @Override
+                public void onDismiss(DialogInterface dialog) {
+                    ((Activity) context).finish();
+                }
+            });
+        }
+        if (!(context instanceof Activity)) {
+            alertDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);//.TYPE_SYSTEM_ALERT);
+        }
         alertDialog.show();
     }
 
@@ -750,7 +776,7 @@ public class AgendaUpdateService extends Service {
         Log.v("MYCALENDAR","creating activity intent with id="+id+" and event id="+eventId+" for action "+action);
 
         Intent actionIntent = new Intent(context, MainActivity.SnoozeReminderActivity.class);//action);
-        actionIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        actionIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         // https://stackoverflow.com/questions/9772927/flag-activity-new-task-clarification-needed
         //startActivity(actionIntent);
         actionIntent.setAction(action);
@@ -784,8 +810,8 @@ public class AgendaUpdateService extends Service {
 
         int id=generateNotificationId(eventId);
         PendingIntent tapIntent=createActionIntent(context,id,eventId,ACTION_VIEW);
-        PendingIntent snoozePendingIntent=createActionIntent(context,id,eventId,ACTION_SNOOZE);
-//        PendingIntent snoozePendingIntent=createActivityActionIntent(context,id,eventId,ACTION_SNOOZE);
+//        PendingIntent snoozePendingIntent=createActionIntent(context,id,eventId,ACTION_SNOOZE);
+        PendingIntent snoozePendingIntent=createActivityActionIntent(context,id,eventId,ACTION_SNOOZE);
         PendingIntent dismissPendingIntent=createActionIntent(context,id,eventId,ACTION_DISMISS);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)

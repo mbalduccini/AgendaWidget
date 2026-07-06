@@ -333,7 +333,7 @@ public class MainActivity extends AppCompatActivity {
                         Log.w("MYCALENDAR","entry is ExtendedCalendarEvent? "+(item instanceof ExtendedCalendarEvent));
 
                         if (item instanceof ExtendedCalendarEvent) {
-                            mServer.handleSnooze(context, (ExtendedCalendarEvent)item);
+                            mServer.handleSnooze(MainActivity.this, (ExtendedCalendarEvent)item);
                             // The following lines are no longer needed. The service takes care of everything
                             /*
                             mServer.removeNotification(context,((ExtendedCalendarEvent) item).getId());
@@ -898,64 +898,55 @@ public class MainActivity extends AppCompatActivity {
 
 
     public static class SnoozeReminderActivity extends Activity {
+        private AgendaUpdateService mServer;
+        private boolean mBounded;
+        private long eventId = -1;
+
+        private final ServiceConnection mConnection = new ServiceConnection() {
+            @Override
+            public void onServiceDisconnected(ComponentName name) {
+                mBounded = false;
+                mServer = null;
+            }
+
+            @Override
+            public void onServiceConnected(ComponentName name, IBinder service) {
+                mBounded = true;
+                AgendaUpdateService.LocalBinder mLocalBinder = (AgendaUpdateService.LocalBinder)service;
+                mServer = mLocalBinder.getServerInstance();
+                ExtendedCalendarEvent event = mServer.findCalendarEvent(eventId);
+                if (event == null) {
+                    Log.e("MYCALENDAR", "SnoozeReminderActivity: event not found for id=" + eventId);
+                    finish();
+                    return;
+                }
+                mServer.handleSnooze(SnoozeReminderActivity.this, event);
+            }
+        };
 
         @Override
         public void onCreate(Bundle icicle) {
             super.onCreate(icicle);
 
-//            context = getApplicationContext();
+            eventId = getIntent().getLongExtra(AgendaUpdateService.EXTRA_EVENT_ID, -1);
+            if (eventId == -1) {
+                Log.e("MYCALENDAR", "SnoozeReminderActivity: missing event id");
+                finish();
+                return;
+            }
 
-            // hide the title bar
-            // https://stackoverflow.com/questions/14475109/remove-android-app-title-bar
-//            getSupportActionBar().hide();
-
-//            setContentView(R.layout.activity_main);
-
-//            AgendaUpdateService.observer.clearTimer();
-            setupWindow();
+            Intent serviceIntent = new Intent(this, AgendaUpdateService.class);
+            startService(serviceIntent);
+            bindService(serviceIntent, mConnection, BIND_AUTO_CREATE);
         }
 
-        public void setupWindow() {
-            /*
-            View view = View.inflate(SnoozeReminderActivity.this, R.layout.time_dialog, null);
-            final NumberPicker numberPickerHour = view.findViewById(R.id.numpicker_hours);
-            numberPickerHour.setMaxValue(23);
-            numberPickerHour.setValue(0);//sharedPreferences.getInt("Hours", 0));
-            final NumberPicker numberPickerMinutes = view.findViewById(R.id.numpicker_minutes);
-            numberPickerMinutes.setMaxValue(59);
-            numberPickerMinutes.setValue(0);//sharedPreferences.getInt("Minutes", 0));
-            final NumberPicker numberPickerSeconds = view.findViewById(R.id.numpicker_seconds);
-            numberPickerSeconds.setMaxValue(59);
-            numberPickerSeconds.setValue(0);//sharedPreferences.getInt("Seconds", 0));
-            Button cancel = view.findViewById(R.id.cancel);
-            Button ok = view.findViewById(R.id.ok);
-            AlertDialog.Builder builder = new AlertDialog.Builder(SnoozeReminderActivity.this);
-            builder.setView(view);
-            final AlertDialog alertDialog = builder.create();
-            cancel.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    alertDialog.dismiss();
-                    finish();
-                }
-            });
-            ok.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    Log.v("MYCALENDAR","time picked: "+numberPickerHour.getValue() + ":" + numberPickerMinutes.getValue() + ":" + numberPickerSeconds.getValue());
-//                        timeTV.setText(String.format("%1$d:%2$02d:%3$02d", numberPickerHour.getValue(), numberPickerMinutes.getValue(), numberPickerSeconds.getValue()));
-//                    SharedPreferences.Editor editor = sharedPreferences.edit();
-//                    editor.putInt("Hours", numberPickerHour.getValue());
-//                    editor.putInt("Minutes", numberPickerMinutes.getValue());
-//                    editor.putInt("Seconds", numberPickerSeconds.getValue());
-//                    editor.apply();
-
-                    alertDialog.dismiss();
-                    finish();
-                }
-            });
-            alertDialog.show();
-            */
+        @Override
+        protected void onDestroy() {
+            if (mBounded) {
+                unbindService(mConnection);
+                mBounded = false;
+            }
+            super.onDestroy();
         }
     }
 }

@@ -6,8 +6,8 @@ android {
         applicationId "gr.ictpro.jsalatas.agendawidget"
         minSdkVersion 26
         targetSdkVersion 28
-        versionCode 4
-        versionName "1.0.3"
+        versionCode 5
+        versionName "1.0.4"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [appLabel: "@string/app_name"]
     }
@@ -29,7 +29,7 @@ android {
             dimension "environment"
             applicationIdSuffix ".dev"
             versionNameSuffix "-dev"
-            manifestPlaceholders = [appLabel: "Agenda Widget Dev"]
+            manifestPlaceholders = [appLabel: "Agenda Widget (Dev)"]
             resValue("bool", "FIREBASE_CRASH_ENABLED", "false")
         }
     }

@@ -9,6 +9,7 @@ android {
         versionCode 4
         versionName "1.0.3"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders = [appLabel: "@string/app_name"]
     }
     // Enable Java 8 support
     // https://stackoverflow.com/questions/43423057/how-to-enable-java-8-language-features-in-android-studio
@@ -18,6 +19,19 @@ android {
     }
     sourceSets {
         main.java.srcDirs += ['../lib-recur/src/main/java', '../rfc5545-datetime/src/main/java']
+    }
+    flavorDimensions "environment"
+    productFlavors {
+        prod {
+            dimension "environment"
+        }
+        dev {
+            dimension "environment"
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            manifestPlaceholders = [appLabel: "Agenda Widget Dev"]
+            resValue("bool", "FIREBASE_CRASH_ENABLED", "false")
+        }
     }
     buildTypes {
         release {

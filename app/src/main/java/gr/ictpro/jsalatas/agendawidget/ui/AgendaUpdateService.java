@@ -209,13 +209,15 @@ public class AgendaUpdateService extends Service {
     private static class NotificationDetails {
         final String title;
         final String description;
+        final String location;
         final long startTime;
         final long triggerTime;
         final String groupKey;
 
-        NotificationDetails(String title, String description, long startTime, long triggerTime, String groupKey) {
+        NotificationDetails(String title, String description, String location, long startTime, long triggerTime, String groupKey) {
             this.title = title;
             this.description = description;
+            this.location = location == null ? "" : location.trim();
             this.startTime = startTime;
             this.triggerTime = triggerTime;
             this.groupKey = groupKey;
@@ -227,6 +229,7 @@ public class AgendaUpdateService extends Service {
                     && triggerTime == other.triggerTime
                     && groupKey.equals(other.groupKey)
                     && title.equals(other.title)
+                    && location.equals(other.location)
                     && description.equals(other.description);
         }
     }
@@ -847,6 +850,20 @@ public class AgendaUpdateService extends Service {
         return notificationKey.hashCode();
     }
 
+    String notificationContentText(NotificationDetails details) {
+        if (details.location.isEmpty()) {
+            return details.description;
+        }
+        return details.description + ", " + details.location;
+    }
+
+    String notificationBigText(NotificationDetails details) {
+        if (details.location.isEmpty()) {
+            return details.description;
+        }
+        return details.description + "\n" + details.location;
+    }
+
     PendingIntent createActionIntent(Context context,int id,long eventId,String action) {
         //if (!NEW_INTENTS) setupBroadcastReceiver();
 
@@ -901,7 +918,7 @@ public class AgendaUpdateService extends Service {
         }
     }
 
-    void createNotification(Context context,long eventId,String notificationKey,String groupKey,String title,String descr,long notificationWhen) {
+    void createNotification(Context context,long eventId,String notificationKey,NotificationDetails details,long notificationWhen) {
         //createNotificationChannel(context,NOTIFICATION_CHANNEL_ID);
 
         int requestCode=notificationRequestCode(notificationKey);
@@ -913,14 +930,14 @@ public class AgendaUpdateService extends Service {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notes)
-                .setContentTitle(title)
-                .setContentText(descr)
+                .setContentTitle(details.title)
+                .setContentText(notificationContentText(details))
                 .setWhen(notificationWhen)
                 .setShowWhen(false)
                 .setPriority(NotificationCompat.PRIORITY_MAX) //PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setStyle(new NotificationCompat.BigTextStyle()
-                        .bigText(descr))
+                        .bigText(notificationBigText(details)))
 //                        .addLine(str1)
 //                        .addLine(str2)
 //                        .setContentTitle("")
@@ -950,7 +967,7 @@ public class AgendaUpdateService extends Service {
         //
         // If alerts for a notification's group should be handled by a different notification, call setGroupAlertBehavior(). For example, if you want only the summary of your group to make noise, all children in the group should have the group alert behavior GROUP_ALERT_SUMMARY. The other options are GROUP_ALERT_ALL and GROUP_ALERT_CHILDREN.
         //
-        builder=builder.setGroup(groupKey)
+        builder=builder.setGroup(details.groupKey)
                 .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY);
 
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
@@ -1229,6 +1246,8 @@ public class AgendaUpdateService extends Service {
                     .append('|')
                     .append(details.description)
                     .append('|')
+                    .append(details.location)
+                    .append('|')
                     .append(details.title);
         }
         return builder.toString();
@@ -1267,7 +1286,7 @@ public class AgendaUpdateService extends Service {
                     long eventId = calendarEvent.getId();
                     long triggerTime = calendarEvent.getTrigger() == null ? calendarEvent.getStartDate().getTime() : calendarEvent.getTrigger().getTime();
                     String groupKey = reminderNotificationGroupKey(context, calendarEvent.getCalendarId());
-                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime(), triggerTime, groupKey);
+                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getLocation(), calendarEvent.getStartDate().getTime(), triggerTime, groupKey);
                     String notificationKey = eventNotificationKey(eventId, details.startTime);
                     NotificationDetails previousDetails = previousNotificationDetails.get(notificationKey);
                     triggeredReminderDetails.add(details);
@@ -1301,8 +1320,8 @@ public class AgendaUpdateService extends Service {
             PendingReminderNotification pendingNotification = pendingReminderNotifications.get(index);
             if (pendingNotification.needsUpdate) {
                 long notificationWhen = notificationOrderBase - index;
-                createNotification(context, pendingNotification.eventId, pendingNotification.notificationKey, pendingNotification.details.groupKey,
-                        pendingNotification.details.title, pendingNotification.details.description, notificationWhen);
+                createNotification(context, pendingNotification.eventId, pendingNotification.notificationKey,
+                        pendingNotification.details, notificationWhen);
                 changed = true;
             }
         }

@@ -135,6 +135,8 @@
     <!-- Notifications -->
     <string name="snooze">Snooze</string>
     <string name="dismiss">Dismiss</string>
+    <string name="visit_url">Visit URL</string>
+    <string name="directions">Directions</string>
     <string name="reminders_category">Reminders</string>
     <string name="confirm_swipe_dismiss_prop">Confirm swipe dismiss</string>
     <string name="confirm_swipe_dismiss_desc">Ask before dismissing a reminder when its notification is swiped away.</string>

@@ -31,6 +31,7 @@ import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.text.SpannableString;
+import android.util.Patterns;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
 import android.view.View;
@@ -864,6 +865,33 @@ public class AgendaUpdateService extends Service {
         return details.description + "\n" + details.location;
     }
 
+    boolean isWebUrl(String value) {
+        return value != null && Patterns.WEB_URL.matcher(value.trim()).matches();
+    }
+
+    String webUrlWithScheme(String value) {
+        String url = value.trim();
+        if (!url.matches("(?i)^[a-z][a-z0-9+.-]*:.*")) {
+            return "https://" + url;
+        }
+        return url;
+    }
+
+    PendingIntent createLocationActionIntent(Context context, int requestCode, NotificationDetails details) {
+        if (details.location.isEmpty()) {
+            return null;
+        }
+
+        Intent intent;
+        if (isWebUrl(details.location)) {
+            intent = new Intent(Intent.ACTION_VIEW, Uri.parse(webUrlWithScheme(details.location)));
+        } else {
+            intent = new Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(details.location)));
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return PendingIntent.getActivity(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
     PendingIntent createActionIntent(Context context,int id,long eventId,String action) {
         //if (!NEW_INTENTS) setupBroadcastReceiver();
 
@@ -927,6 +955,7 @@ public class AgendaUpdateService extends Service {
         PendingIntent snoozePendingIntent=createActivityActionIntent(context,requestCode,eventId,ACTION_SNOOZE);
         PendingIntent dismissPendingIntent=createActionIntent(context,requestCode,eventId,ACTION_DISMISS);
         PendingIntent swipeDismissPendingIntent=createActionIntent(context,requestCode,eventId,ACTION_SWIPE_DISMISS);
+        PendingIntent locationPendingIntent=createLocationActionIntent(context, requestCode ^ 0x31f17c09, details);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notes)
@@ -960,6 +989,11 @@ public class AgendaUpdateService extends Service {
                 // but it requires API level 31
                 //.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 ;
+
+        if (locationPendingIntent != null) {
+            int locationLabel = isWebUrl(details.location) ? R.string.visit_url : R.string.directions;
+            builder.addAction(R.drawable.ic_location, context.getString(locationLabel), locationPendingIntent);
+        }
 
         // Group the notifications
         // https://developer.android.com/training/notify-user/group

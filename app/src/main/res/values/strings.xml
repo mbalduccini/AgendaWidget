@@ -135,5 +135,13 @@
     <!-- Notifications -->
     <string name="snooze">Snooze</string>
     <string name="dismiss">Dismiss</string>
+    <string name="reminders_category">Reminders</string>
+    <string name="confirm_swipe_dismiss_prop">Confirm swipe dismiss</string>
+    <string name="confirm_swipe_dismiss_desc">Ask before dismissing a reminder when its notification is swiped away.</string>
+    <string name="separate_reminders_by_calendar_prop">Separate reminders by calendar</string>
+    <string name="separate_reminders_by_calendar_desc">Group reminder notifications separately for each calendar.</string>
+    <string name="confirm_dismiss_title">Dismiss reminder?</string>
+    <string name="confirm_dismiss_message">Dismiss this reminder?</string>
+    <string name="cancel">Cancel</string>
 
 </resources>

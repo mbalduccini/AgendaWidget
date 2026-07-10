@@ -52,6 +52,7 @@ import gr.ictpro.jsalatas.agendawidget.model.EventItem;
 import gr.ictpro.jsalatas.agendawidget.model.Events;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendarEvent;
 import gr.ictpro.jsalatas.agendawidget.model.calendar.ExtendedCalendars;
+import gr.ictpro.jsalatas.agendawidget.model.settings.Settings;
 import gr.ictpro.jsalatas.agendawidget.model.settings.TaskProviderListAdapter;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskContract;
 import gr.ictpro.jsalatas.agendawidget.model.task.TaskProvider;
@@ -159,6 +160,7 @@ public class AgendaUpdateService extends Service {
     public final static String ACTION_VIEW = "view";
     public final static String ACTION_SNOOZE = "snooze";
     public final static String ACTION_DISMISS = "dismiss";
+    public final static String ACTION_SWIPE_DISMISS = "swipe_dismiss";
     public final static String ACTION_UPDATE = "gr.ictpro.jsalatas.agendawidget.action.UPDATE";
 
     final static String NOTIFICATION_CHANNEL_ID = "AgendaWidget Notification Channel";
@@ -188,7 +190,7 @@ public class AgendaUpdateService extends Service {
     List<String> currentNotifications = new ArrayList<>();
     List<String> newNotifications = new ArrayList<>();
     Map<String, NotificationDetails> currentNotificationDetails = new HashMap<>();
-    String currentSummarySignature = "";
+    Map<String, String> currentSummarySignatures = new HashMap<>();
     List<EventItem> events = new ArrayList<>();
     boolean legacyUntaggedNotificationsCleaned = false;
     long lastNotificationPostMs = 0;
@@ -209,18 +211,21 @@ public class AgendaUpdateService extends Service {
         final String description;
         final long startTime;
         final long triggerTime;
+        final String groupKey;
 
-        NotificationDetails(String title, String description, long startTime, long triggerTime) {
+        NotificationDetails(String title, String description, long startTime, long triggerTime, String groupKey) {
             this.title = title;
             this.description = description;
             this.startTime = startTime;
             this.triggerTime = triggerTime;
+            this.groupKey = groupKey;
         }
 
         boolean matches(NotificationDetails other) {
             if (other == null) return false;
             return startTime == other.startTime
                     && triggerTime == other.triggerTime
+                    && groupKey.equals(other.groupKey)
                     && title.equals(other.title)
                     && description.equals(other.description);
         }
@@ -428,6 +433,44 @@ public class AgendaUpdateService extends Service {
         alertDialog.show();
     }
 
+    public void handleSwipeDismiss(Context context, ExtendedCalendarEvent event) {
+        if (!Settings.getBoolPref(AgendaWidgetApplication.getContext(), "confirmSwipeDismiss", appWidgetId)) {
+            handleDismiss(context, event);
+            return;
+        }
+
+        Intent closeIntent = new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
+        context.sendBroadcast(closeIntent);
+
+        Context dialogContext = new ContextThemeWrapper(context, R.style.AlertDialogTheme);
+        AlertDialog.Builder builder = new AlertDialog.Builder(dialogContext);
+        builder.setTitle(context.getString(R.string.confirm_dismiss_title));
+        builder.setMessage(context.getString(R.string.confirm_dismiss_message) + "\n\n" + event.getTitle());
+        builder.setNegativeButton(context.getString(R.string.cancel), new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                refreshList(AgendaUpdateService.this);
+            }
+        });
+        builder.setPositiveButton(context.getString(R.string.dismiss), new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                handleDismiss(AgendaUpdateService.this, event);
+            }
+        });
+        final AlertDialog alertDialog = builder.create();
+        alertDialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+            @Override
+            public void onCancel(DialogInterface dialog) {
+                refreshList(AgendaUpdateService.this);
+            }
+        });
+        if (!(dialogContext instanceof Activity)) {
+            alertDialog.getWindow().setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+        }
+        alertDialog.show();
+    }
+
     // TODO remove this and fold into the other receiver -- or decide once and for all to keep them separate
     private final BroadcastReceiver agendaChangedReceiver = new
             BroadcastReceiver() {
@@ -501,6 +544,12 @@ public class AgendaUpdateService extends Service {
                         if (event != null) {
                             handleDismiss(context, event);
                         }
+                    } else if (intent.getAction().equals(ACTION_SWIPE_DISMISS)) {
+                        Log.v("MYCALENDAR", "received swipe dismiss event");
+                        ExtendedCalendarEvent event = eventFromIntent(intent);
+                        if (event != null) {
+                            handleSwipeDismiss(context, event);
+                        }
                     } else if (intent.getAction().equals(ACTION_SNOOZE)) {
                         {
                             Log.v("MYCALENDAR", "received snooze event");
@@ -571,6 +620,7 @@ public class AgendaUpdateService extends Service {
                     intentFilter2.addAction(ACTION_VIEW);
                     intentFilter2.addAction(ACTION_SNOOZE);
                     intentFilter2.addAction(ACTION_DISMISS);
+                    intentFilter2.addAction(ACTION_SWIPE_DISMISS);
                 }
 
                 Log.v("MYCALENDAR", "inside setupService()");
@@ -760,6 +810,13 @@ public class AgendaUpdateService extends Service {
         return EVENT_NOTIFICATION_TAG_PREFIX + notificationKey;
     }
 
+    String reminderNotificationGroupKey(Context context, int calendarId) {
+        if (!Settings.getBoolPref(context, "separateRemindersByCalendar", appWidgetId)) {
+            return MY_NOTIFICATION_GROUP_ID;
+        }
+        return MY_NOTIFICATION_GROUP_ID + ".calendar." + calendarId;
+    }
+
     boolean isEventNotificationTag(String tag) {
         return tag != null && tag.startsWith(EVENT_NOTIFICATION_TAG_PREFIX);
     }
@@ -844,7 +901,7 @@ public class AgendaUpdateService extends Service {
         }
     }
 
-    void createNotification(Context context,long eventId,String notificationKey,String title,String descr,long notificationWhen) {
+    void createNotification(Context context,long eventId,String notificationKey,String groupKey,String title,String descr,long notificationWhen) {
         //createNotificationChannel(context,NOTIFICATION_CHANNEL_ID);
 
         int requestCode=notificationRequestCode(notificationKey);
@@ -852,6 +909,7 @@ public class AgendaUpdateService extends Service {
 //        PendingIntent snoozePendingIntent=createActionIntent(context,id,eventId,ACTION_SNOOZE);
         PendingIntent snoozePendingIntent=createActivityActionIntent(context,requestCode,eventId,ACTION_SNOOZE);
         PendingIntent dismissPendingIntent=createActionIntent(context,requestCode,eventId,ACTION_DISMISS);
+        PendingIntent swipeDismissPendingIntent=createActionIntent(context,requestCode,eventId,ACTION_SWIPE_DISMISS);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notes)
@@ -876,11 +934,11 @@ public class AgendaUpdateService extends Service {
                 .setDefaults(Notification.DEFAULT_ALL)
                 // Set the intent that will fire when the user taps the notification
                 .setContentIntent(tapIntent)
+                .setDeleteIntent(swipeDismissPendingIntent)
                 .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, context.getString(R.string.snooze),
                         snoozePendingIntent)
                 .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, context.getString(R.string.dismiss),
                         dismissPendingIntent)
-                .setOngoing(true) // prevent the user from swiping it away
                 // https://stackoverflow.com/questions/73074639/android-foreground-service-notification-delayed
                 // but it requires API level 31
                 //.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
@@ -892,7 +950,7 @@ public class AgendaUpdateService extends Service {
         //
         // If alerts for a notification's group should be handled by a different notification, call setGroupAlertBehavior(). For example, if you want only the summary of your group to make noise, all children in the group should have the group alert behavior GROUP_ALERT_SUMMARY. The other options are GROUP_ALERT_ALL and GROUP_ALERT_CHILDREN.
         //
-        builder=builder.setGroup(MY_NOTIFICATION_GROUP_ID)
+        builder=builder.setGroup(groupKey)
                 .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY);
 
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
@@ -927,14 +985,18 @@ public class AgendaUpdateService extends Service {
     }
 
     public Notification createSummaryNotification(Context appContext,String channel) {
-        return(createSummaryNotification(appContext, channel, false));
+        return createSummaryNotification(appContext, channel, MY_NOTIFICATION_GROUP_ID, new ArrayList<NotificationDetails>(), false);
     }
 
     public Notification createSummaryNotification(Context appContext,String channel, boolean doDisplayNotification) {
-        return createSummaryNotification(appContext, channel, new ArrayList<NotificationDetails>(), doDisplayNotification);
+        return createSummaryNotification(appContext, channel, MY_NOTIFICATION_GROUP_ID, new ArrayList<NotificationDetails>(), doDisplayNotification);
     }
 
     public Notification createSummaryNotification(Context appContext, String channel, List<NotificationDetails> reminderDetails, boolean doDisplayNotification) {
+        return createSummaryNotification(appContext, channel, MY_NOTIFICATION_GROUP_ID, reminderDetails, doDisplayNotification);
+    }
+
+    public Notification createSummaryNotification(Context appContext, String channel, String groupKey, List<NotificationDetails> reminderDetails, boolean doDisplayNotification) {
         //createNotificationChannel(appContext,channel);
         //PendingIntent tapIntent=createActionIntent(appContext,0,0,ACTION_OPEN_APP);
         PackageManager pm = getPackageManager();
@@ -972,7 +1034,7 @@ public class AgendaUpdateService extends Service {
                         //
                         // If alerts for a notification's group should be handled by a different notification, call setGroupAlertBehavior(). For example, if you want only the summary of your group to make noise, all children in the group should have the group alert behavior GROUP_ALERT_SUMMARY. The other options are GROUP_ALERT_ALL and GROUP_ALERT_CHILDREN.
                         //
-                        .setGroup(MY_NOTIFICATION_GROUP_ID)
+                        .setGroup(groupKey)
                         //set this notification as the summary for the group
                         .setGroupSummary(true)
                         .setSortKey("0_summary")
@@ -984,7 +1046,7 @@ public class AgendaUpdateService extends Service {
             notificationManager.cancel(LEGACY_SUMMARY_NOTIFICATION_ID);
             notificationManager.cancel(LEGACY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
             throttleNotificationPost();
-            notificationManager.notify(MY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID, summaryNotification);
+            notificationManager.notify(groupKey, SUMMARY_NOTIFICATION_ID, summaryNotification);
             lastNotificationPostMs = System.currentTimeMillis();
         }
         return(summaryNotification);
@@ -1043,6 +1105,9 @@ public class AgendaUpdateService extends Service {
 
     public void removeSummaryNotification(Context appContext) {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
+        for (String groupKey : currentSummarySignatures.keySet()) {
+            notificationManager.cancel(groupKey, SUMMARY_NOTIFICATION_ID);
+        }
         notificationManager.cancel(MY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
         notificationManager.cancel(LEGACY_SUMMARY_NOTIFICATION_ID);
         notificationManager.cancel(LEGACY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
@@ -1129,6 +1194,30 @@ public class AgendaUpdateService extends Service {
         }
     }
 
+    private void removeStaleSummaryNotifications(Context context, Map<String, String> activeSummarySignatures) {
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            Log.w("MYCALENDAR", "Cannot remove stale summary notifications: NotificationManager is null");
+            return;
+        }
+
+        try {
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
+
+                String tag = activeNotification.getTag();
+                if (tag != null && tag.startsWith(MY_NOTIFICATION_GROUP_ID)
+                        && !activeSummarySignatures.containsKey(tag)) {
+                    notificationManager.cancel(tag, activeNotification.getId());
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.w("MYCALENDAR", "Cannot remove stale summary notifications", e);
+        }
+    }
+
     private String buildSummarySignature(List<NotificationDetails> reminderDetails) {
         StringBuilder builder = new StringBuilder();
         builder.append(reminderDetails.size());
@@ -1162,6 +1251,7 @@ public class AgendaUpdateService extends Service {
         Map<String, NotificationDetails> newNotificationDetails = new HashMap<>();
         List<String> activeNotificationKeys = getActiveNotificationKeys(context);
         List<NotificationDetails> triggeredReminderDetails = new ArrayList<>();
+        Map<String, List<NotificationDetails>> triggeredReminderDetailsByGroup = new HashMap<>();
         List<PendingReminderNotification> pendingReminderNotifications = new ArrayList<>();
         removeStaleIndividualNotifications(context);
 
@@ -1176,10 +1266,17 @@ public class AgendaUpdateService extends Service {
                     SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
                     long eventId = calendarEvent.getId();
                     long triggerTime = calendarEvent.getTrigger() == null ? calendarEvent.getStartDate().getTime() : calendarEvent.getTrigger().getTime();
-                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime(), triggerTime);
+                    String groupKey = reminderNotificationGroupKey(context, calendarEvent.getCalendarId());
+                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime(), triggerTime, groupKey);
                     String notificationKey = eventNotificationKey(eventId, details.startTime);
                     NotificationDetails previousDetails = previousNotificationDetails.get(notificationKey);
                     triggeredReminderDetails.add(details);
+                    List<NotificationDetails> groupReminderDetails = triggeredReminderDetailsByGroup.get(details.groupKey);
+                    if (groupReminderDetails == null) {
+                        groupReminderDetails = new ArrayList<>();
+                        triggeredReminderDetailsByGroup.put(details.groupKey, groupReminderDetails);
+                    }
+                    groupReminderDetails.add(details);
                     boolean isCached = previousNotifications.contains(notificationKey);
                     boolean isActive = activeNotificationKeys == null || activeNotificationKeys.contains(notificationKey);
                     boolean needsUpdate = !isCached || !isActive || !details.matches(previousDetails);
@@ -1204,7 +1301,7 @@ public class AgendaUpdateService extends Service {
             PendingReminderNotification pendingNotification = pendingReminderNotifications.get(index);
             if (pendingNotification.needsUpdate) {
                 long notificationWhen = notificationOrderBase - index;
-                createNotification(context, pendingNotification.eventId, pendingNotification.notificationKey,
+                createNotification(context, pendingNotification.eventId, pendingNotification.notificationKey, pendingNotification.details.groupKey,
                         pendingNotification.details.title, pendingNotification.details.description, notificationWhen);
                 changed = true;
             }
@@ -1230,13 +1327,27 @@ public class AgendaUpdateService extends Service {
         }
         currentNotifications=new ArrayList<>(newNotifications);
         currentNotificationDetails = newNotificationDetails;
-        String newSummarySignature = buildSummarySignature(triggeredReminderDetails);
-        if (!newSummarySignature.equals(currentSummarySignature)) {
-            createSummaryNotification(context, NOTIFICATION_CHANNEL_ID, triggeredReminderDetails, true);
-            updateTriggeredRemindersChildNotification(context, triggeredReminderDetails);
-            currentSummarySignature = newSummarySignature;
-            changed = true;
+        Map<String, String> newSummarySignatures = new HashMap<>();
+        for (String groupKey : triggeredReminderDetailsByGroup.keySet()) {
+            List<NotificationDetails> groupReminderDetails = triggeredReminderDetailsByGroup.get(groupKey);
+            String newSummarySignature = buildSummarySignature(groupReminderDetails);
+            newSummarySignatures.put(groupKey, newSummarySignature);
+            String previousSummarySignature = currentSummarySignatures.get(groupKey);
+            if (!newSummarySignature.equals(previousSummarySignature)) {
+                createSummaryNotification(context, NOTIFICATION_CHANNEL_ID, groupKey, groupReminderDetails, true);
+                changed = true;
+            }
         }
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
+        for (String groupKey : currentSummarySignatures.keySet()) {
+            if (!newSummarySignatures.containsKey(groupKey)) {
+                notificationManager.cancel(groupKey, SUMMARY_NOTIFICATION_ID);
+                changed = true;
+            }
+        }
+        removeStaleSummaryNotifications(context, newSummarySignatures);
+        updateTriggeredRemindersChildNotification(context, triggeredReminderDetails);
+        currentSummarySignatures = newSummarySignatures;
         if (!AgendaUpdateService.PERSISTENT_NOTIFICATION /*|| !AgendaUpdateService.PERSISTENT_NOTIFICATION_IS_SUMMARY*/) {
             boolean hadSummary = previousNotifications.size()>1;
             boolean needsSummary = currentNotifications.size()>1;

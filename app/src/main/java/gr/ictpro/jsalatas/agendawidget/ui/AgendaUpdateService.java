@@ -142,12 +142,15 @@ MORE CODE RELATED TO REGISTRATION OF OBSERVERS
 */
 public class AgendaUpdateService extends Service {
     final static boolean PERSISTENT_NOTIFICATION = true;
-    final static boolean PERSISTENT_NOTIFICATION_IS_SUMMARY = true;
+    final static boolean PERSISTENT_NOTIFICATION_IS_SUMMARY = false;
     final static int TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID = 0;
     final static int FIRST_EVENT_NOTIFICATION_ID = 1;
-    final static int MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS = 3;
+    final static int EVENT_NOTIFICATION_ID = 0;
+    final static int SUMMARY_NOTIFICATION_ID = 0;
+    final static int LEGACY_SUMMARY_NOTIFICATION_ID = -1;
     final static int MAX_STALE_NOTIFICATION_ID_TO_CLEAN = 32;
     final static long TRIGGERED_REMINDERS_CHILD_SORT_TIME = Long.MAX_VALUE;
+    final static long MIN_NOTIFICATION_POST_INTERVAL_MS = 300;
 
     public final static boolean NEW_INTENTS = true;// this CANNOT be false. To switch to false, find a way to re-enable the block under condition "!NEW_INTENTS" that is currently commented out
 
@@ -161,9 +164,10 @@ public class AgendaUpdateService extends Service {
     final static String NOTIFICATION_CHANNEL_ID = "AgendaWidget Notification Channel";
     final static String SERV_NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID; //"Fg Service Notification Channel";
     final static String EXTRA_EVENT_ID = "eventId";
+    final static String EVENT_NOTIFICATION_TAG_PREFIX = "event:";
     // ID for grouping notifications
-    final static String MY_NOTIFICATION_GROUP_ID = "Notification Group";
-    final static int SUMMARY_NOTIFICATION_ID = -1;
+    final static String MY_NOTIFICATION_GROUP_ID = BuildConfig.APPLICATION_ID + ".GROUP_REMINDER_NOTIFICATIONS";
+    final static String LEGACY_NOTIFICATION_GROUP_ID = "Notification Group";
     final static int SERV_NOTIFICATION_ID = -2;
     NotificationChannel notificationChannel = null;
 
@@ -181,12 +185,13 @@ public class AgendaUpdateService extends Service {
     private AgendaWidget.TaskObserver[] taskObservers;
 
     //BroadcastReceiver br = null;
-    List<Long> currentNotifications = new ArrayList<>();
-    List<Long> newNotifications = new ArrayList<>();
-    Map<Long, NotificationDetails> currentNotificationDetails = new HashMap<>();
+    List<String> currentNotifications = new ArrayList<>();
+    List<String> newNotifications = new ArrayList<>();
+    Map<String, NotificationDetails> currentNotificationDetails = new HashMap<>();
     String currentSummarySignature = "";
     List<EventItem> events = new ArrayList<>();
-    List<Long> notifiedEventIDs = new ArrayList<>();
+    boolean legacyUntaggedNotificationsCleaned = false;
+    long lastNotificationPostMs = 0;
 
     public final static int appWidgetId = 1;
     public final static String EVENTS_UPDATED_BROADCAST = AgendaUpdateService.class.getName() + "EventsUpdated";
@@ -199,23 +204,39 @@ public class AgendaUpdateService extends Service {
     boolean serviceRunning = false;
     private Timer notificationTimer;
     private Timer taskObserverRefreshTimer;
-
     private static class NotificationDetails {
         final String title;
         final String description;
         final long startTime;
+        final long triggerTime;
 
-        NotificationDetails(String title, String description, long startTime) {
+        NotificationDetails(String title, String description, long startTime, long triggerTime) {
             this.title = title;
             this.description = description;
             this.startTime = startTime;
+            this.triggerTime = triggerTime;
         }
 
         boolean matches(NotificationDetails other) {
             if (other == null) return false;
             return startTime == other.startTime
+                    && triggerTime == other.triggerTime
                     && title.equals(other.title)
                     && description.equals(other.description);
+        }
+    }
+
+    private static class PendingReminderNotification {
+        final long eventId;
+        final String notificationKey;
+        final NotificationDetails details;
+        final boolean needsUpdate;
+
+        PendingReminderNotification(long eventId, String notificationKey, NotificationDetails details, boolean needsUpdate) {
+            this.eventId = eventId;
+            this.notificationKey = notificationKey;
+            this.details = details;
+            this.needsUpdate = needsUpdate;
         }
     }
 
@@ -701,7 +722,7 @@ public class AgendaUpdateService extends Service {
             createNotificationChannel(this,SERV_NOTIFICATION_CHANNEL_ID);
             if (PERSISTENT_NOTIFICATION_IS_SUMMARY) {
                 Notification n = createSummaryNotification(this, NOTIFICATION_CHANNEL_ID);
-                startForeground(SUMMARY_NOTIFICATION_ID, n);
+                startForeground(LEGACY_SUMMARY_NOTIFICATION_ID, n);
             }
             else {
                 Notification n=createForegroundServiceNotification(this);
@@ -731,30 +752,42 @@ public class AgendaUpdateService extends Service {
         return START_STICKY;
     }
 
-    int generateNotificationId(long eventId) {
-        synchronized(notifiedEventIDs) {
-            int firstEmpty = -1;
-            int firstStaleId = FIRST_EVENT_NOTIFICATION_ID + MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS;
-            while (notifiedEventIDs.size() < firstStaleId) {
-                notifiedEventIDs.add(null);
-            }
-            for (int i = firstStaleId; i < notifiedEventIDs.size(); i++) {
-                notifiedEventIDs.set(i, null);
-            }
-            for (int i = FIRST_EVENT_NOTIFICATION_ID; i < firstStaleId; i++) {
-                if (notifiedEventIDs.get(i) == null) {
-                    if (firstEmpty==-1) firstEmpty = i;
-                }
-                else if (notifiedEventIDs.get(i) == eventId) {
-                    return (i);
-                }
-            }
-            if (firstEmpty == -1) {
-                firstEmpty = FIRST_EVENT_NOTIFICATION_ID;
-            }
-            notifiedEventIDs.set(firstEmpty, eventId);
-            return (firstEmpty);
+    String eventNotificationKey(long eventId, long startTime) {
+        return eventId + ":" + startTime;
+    }
+
+    String eventNotificationTag(String notificationKey) {
+        return EVENT_NOTIFICATION_TAG_PREFIX + notificationKey;
+    }
+
+    boolean isEventNotificationTag(String tag) {
+        return tag != null && tag.startsWith(EVENT_NOTIFICATION_TAG_PREFIX);
+    }
+
+    Long eventIdFromNotificationTag(String tag) {
+        if (!isEventNotificationTag(tag)) {
+            return null;
         }
+        try {
+            String notificationKey = tag.substring(EVENT_NOTIFICATION_TAG_PREFIX.length());
+            int separator = notificationKey.indexOf(':');
+            String eventIdPart = separator == -1 ? notificationKey : notificationKey.substring(0, separator);
+            return Long.parseLong(eventIdPart);
+        } catch (NumberFormatException e) {
+            Log.w("MYCALENDAR", "Invalid event notification tag: " + tag, e);
+            return null;
+        }
+    }
+
+    String notificationKeyFromTag(String tag) {
+        if (!isEventNotificationTag(tag)) {
+            return null;
+        }
+        return tag.substring(EVENT_NOTIFICATION_TAG_PREFIX.length());
+    }
+
+    int notificationRequestCode(String notificationKey) {
+        return notificationKey.hashCode();
     }
 
     PendingIntent createActionIntent(Context context,int id,long eventId,String action) {
@@ -811,26 +844,25 @@ public class AgendaUpdateService extends Service {
         }
     }
 
-    void createNotification(Context context,long eventId,String title,String descr,long startTime) {
+    void createNotification(Context context,long eventId,String notificationKey,String title,String descr,long notificationWhen) {
         //createNotificationChannel(context,NOTIFICATION_CHANNEL_ID);
 
-        int id=generateNotificationId(eventId);
-        PendingIntent tapIntent=createActionIntent(context,id,eventId,ACTION_VIEW);
+        int requestCode=notificationRequestCode(notificationKey);
+        PendingIntent tapIntent=createActionIntent(context,requestCode,eventId,ACTION_VIEW);
 //        PendingIntent snoozePendingIntent=createActionIntent(context,id,eventId,ACTION_SNOOZE);
-        PendingIntent snoozePendingIntent=createActivityActionIntent(context,id,eventId,ACTION_SNOOZE);
-        PendingIntent dismissPendingIntent=createActionIntent(context,id,eventId,ACTION_DISMISS);
+        PendingIntent snoozePendingIntent=createActivityActionIntent(context,requestCode,eventId,ACTION_SNOOZE);
+        PendingIntent dismissPendingIntent=createActionIntent(context,requestCode,eventId,ACTION_DISMISS);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notes)
                 .setContentTitle(title)
                 .setContentText(descr)
-                .setWhen(startTime)
-//                .setShowWhen(false) // we only use the "when" attribute for sorting
-//                .setStyle(new NotificationCompat.BigTextStyle()
-//                        .bigText("Much longer text that cannot fit one line..."))
+                .setWhen(notificationWhen)
+                .setShowWhen(false)
                 .setPriority(NotificationCompat.PRIORITY_MAX) //PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_EVENT)
-                .setStyle(new NotificationCompat.InboxStyle())
+                .setStyle(new NotificationCompat.BigTextStyle()
+                        .bigText(descr))
 //                        .addLine(str1)
 //                        .addLine(str2)
 //                        .setContentTitle("")
@@ -849,59 +881,49 @@ public class AgendaUpdateService extends Service {
                 .addAction(R.drawable.ic_calendar_event/*ic_snooze*/, context.getString(R.string.dismiss),
                         dismissPendingIntent)
                 .setOngoing(true) // prevent the user from swiping it away
-// Automatically remove the notification when the user clicks on it
-//                .setAutoCancel(true)
                 // https://stackoverflow.com/questions/73074639/android-foreground-service-notification-delayed
                 // but it requires API level 31
                 //.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 ;
 
-        if (PERSISTENT_NOTIFICATION_IS_SUMMARY)
-                // Group the notifications
-                // https://developer.android.com/training/notify-user/group
-                // By default, notifications are sorted according to when they were posted, but you can change order by calling setSortKey().
-                //
-                // If alerts for a notification's group should be handled by a different notification, call setGroupAlertBehavior(). For example, if you want only the summary of your group to make noise, all children in the group should have the group alert behavior GROUP_ALERT_SUMMARY. The other options are GROUP_ALERT_ALL and GROUP_ALERT_CHILDREN.
-                //
-            builder=builder.setGroup(MY_NOTIFICATION_GROUP_ID)
-                    .setSortKey("1_" + startTime);
+        // Group the notifications
+        // https://developer.android.com/training/notify-user/group
+        // By default, notifications are sorted according to when they were posted, but you can change order by calling setSortKey().
+        //
+        // If alerts for a notification's group should be handled by a different notification, call setGroupAlertBehavior(). For example, if you want only the summary of your group to make noise, all children in the group should have the group alert behavior GROUP_ALERT_SUMMARY. The other options are GROUP_ALERT_ALL and GROUP_ALERT_CHILDREN.
+        //
+        builder=builder.setGroup(MY_NOTIFICATION_GROUP_ID)
+                .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY);
 
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
 
-        notificationManager.notify(id, builder.build());
+        try {
+            throttleNotificationPost();
+            notificationManager.notify(eventNotificationTag(notificationKey), EVENT_NOTIFICATION_ID, builder.build());
+            lastNotificationPostMs = System.currentTimeMillis();
+        } catch (RuntimeException e) {
+            Log.e("MYCALENDAR", "Failed to post reminder notification key=" + notificationKey, e);
+        }
+    }
+
+    private void throttleNotificationPost() {
+        long now = System.currentTimeMillis();
+        long nextAllowedPostMs = lastNotificationPostMs + MIN_NOTIFICATION_POST_INTERVAL_MS;
+        if (now >= nextAllowedPostMs) {
+            return;
+        }
+
+        try {
+            Thread.sleep(nextAllowedPostMs - now);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     public void updateTriggeredRemindersChildNotification(Context appContext, List<NotificationDetails> reminderDetails) {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
         int reminderCount = reminderDetails == null ? 0 : reminderDetails.size();
-        if (reminderCount == 0) {
-            notificationManager.cancel(TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID);
-            return;
-        }
-
-        PackageManager pm = getPackageManager();
-        Intent launchIntent = pm.getLaunchIntentForPackage(BuildConfig.APPLICATION_ID);
-        PendingIntent tapIntent = PendingIntent.getActivity(this, 0, launchIntent, 0);
-        String title = reminderCount == 1
-                ? "1 reminder triggered"
-                : reminderCount + " reminders triggered";
-
-        Notification notification = new NotificationCompat.Builder(appContext, NOTIFICATION_CHANNEL_ID)
-                .setContentTitle(title)
-                .setContentText("Expand to view reminders")
-                .setSmallIcon(R.drawable.ic_notes)
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_EVENT)
-                .setContentIntent(tapIntent)
-                .setWhen(TRIGGERED_REMINDERS_CHILD_SORT_TIME)
-                .setOnlyAlertOnce(true)
-                .setOngoing(true)
-                .setShowWhen(false)
-                .setGroup(MY_NOTIFICATION_GROUP_ID)
-                .setSortKey("0")
-                .build();
-
-        notificationManager.notify(TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID, notification);
+        notificationManager.cancel(TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID);
     }
 
     public Notification createSummaryNotification(Context appContext,String channel) {
@@ -940,8 +962,8 @@ public class AgendaUpdateService extends Service {
                         .setContentText(contentText)
                         .setSmallIcon(R.drawable.ic_notes)
                         .setPriority(NotificationCompat.PRIORITY_MAX)//PRIORITY_DEFAULT)
-                        .setCategory(NotificationCompat.CATEGORY_EVENT)
                         .setContentIntent(tapIntent)
+                        .setAutoCancel(true)
                         // Do not trigger an alert if the notification is already showing and is updated
                         .setOnlyAlertOnce(true)
                         // Group the notifications
@@ -952,12 +974,18 @@ public class AgendaUpdateService extends Service {
                         //
                         .setGroup(MY_NOTIFICATION_GROUP_ID)
                         //set this notification as the summary for the group
-                        .setGroupSummary(true);
+                        .setGroupSummary(true)
+                        .setSortKey("0_summary")
+                        .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY);
 
         Notification summaryNotification = builder.build();
         if (doDisplayNotification) {
             NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
-            notificationManager.notify(SUMMARY_NOTIFICATION_ID, summaryNotification);
+            notificationManager.cancel(LEGACY_SUMMARY_NOTIFICATION_ID);
+            notificationManager.cancel(LEGACY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
+            throttleNotificationPost();
+            notificationManager.notify(MY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID, summaryNotification);
+            lastNotificationPostMs = System.currentTimeMillis();
         }
         return(summaryNotification);
     }
@@ -1015,28 +1043,44 @@ public class AgendaUpdateService extends Service {
 
     public void removeSummaryNotification(Context appContext) {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
-        notificationManager.cancel(SUMMARY_NOTIFICATION_ID);
+        notificationManager.cancel(MY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
+        notificationManager.cancel(LEGACY_SUMMARY_NOTIFICATION_ID);
+        notificationManager.cancel(LEGACY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
     }
 
     private void removeStaleIndividualNotifications(Context context) {
-        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
-        NotificationManager platformNotificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        int firstStaleId = FIRST_EVENT_NOTIFICATION_ID + MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS;
-        synchronized(notifiedEventIDs) {
-            for (int id = firstStaleId; id < notifiedEventIDs.size(); id++) {
-                notifiedEventIDs.set(id, null);
-            }
+        if (legacyUntaggedNotificationsCleaned) {
+            return;
         }
-        for (int id = firstStaleId; id <= MAX_STALE_NOTIFICATION_ID_TO_CLEAN; id++) {
-            notificationManager.cancel(id);
-            if (platformNotificationManager != null) {
-                platformNotificationManager.cancel(id);
+
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            Log.w("MYCALENDAR", "Cannot clean legacy notifications: NotificationManager is null");
+            return;
+        }
+
+        try {
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
+                if (activeNotification.getTag() != null) {
+                    continue;
+                }
+
+                int notificationId = activeNotification.getId();
+                if (notificationId >= FIRST_EVENT_NOTIFICATION_ID && notificationId <= MAX_STALE_NOTIFICATION_ID_TO_CLEAN) {
+                    notificationManager.cancel(notificationId);
+                }
             }
+            legacyUntaggedNotificationsCleaned = true;
+        } catch (RuntimeException e) {
+            Log.w("MYCALENDAR", "Cannot clean legacy notifications", e);
         }
     }
 
-    private List<Long> getActiveNotificationEventIds(Context context) {
-        List<Long> activeEventIds = new ArrayList<>();
+    private List<String> getActiveNotificationKeys(Context context) {
+        List<String> activeNotificationKeys = new ArrayList<>();
         NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (notificationManager == null) {
             Log.w("MYCALENDAR", "Cannot query active notifications: NotificationManager is null");
@@ -1044,25 +1088,14 @@ public class AgendaUpdateService extends Service {
         }
 
         try {
-            StatusBarNotification[] activeNotifications = notificationManager.getActiveNotifications();
-            synchronized(notifiedEventIDs) {
-                for (StatusBarNotification activeNotification : activeNotifications) {
-                    if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
-                        continue;
-                    }
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
 
-                    int notificationId = activeNotification.getId();
-                    if (activeNotification.getTag() != null) {
-                        continue;
-                    }
-                    if (notificationId < 0 || notificationId >= notifiedEventIDs.size()) {
-                        continue;
-                    }
-
-                    Long eventId = notifiedEventIDs.get(notificationId);
-                    if (eventId != null && !activeEventIds.contains(eventId)) {
-                        activeEventIds.add(eventId);
-                    }
+                String notificationKey = notificationKeyFromTag(activeNotification.getTag());
+                if (notificationKey != null && !activeNotificationKeys.contains(notificationKey)) {
+                    activeNotificationKeys.add(notificationKey);
                 }
             }
         } catch (RuntimeException e) {
@@ -1070,7 +1103,30 @@ public class AgendaUpdateService extends Service {
             return null;
         }
 
-        return activeEventIds;
+        return activeNotificationKeys;
+    }
+
+    private void removeStaleTaggedNotifications(Context context, List<String> activeNotificationKeys) {
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            Log.w("MYCALENDAR", "Cannot remove stale tagged notifications: NotificationManager is null");
+            return;
+        }
+
+        try {
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
+
+                String notificationKey = notificationKeyFromTag(activeNotification.getTag());
+                if (notificationKey != null && !activeNotificationKeys.contains(notificationKey)) {
+                    notificationManager.cancel(activeNotification.getTag(), activeNotification.getId());
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.w("MYCALENDAR", "Cannot remove stale tagged notifications", e);
+        }
     }
 
     private String buildSummarySignature(List<NotificationDetails> reminderDetails) {
@@ -1079,6 +1135,8 @@ public class AgendaUpdateService extends Service {
         for (NotificationDetails details : reminderDetails) {
             builder.append('|')
                     .append(details.startTime)
+                    .append('|')
+                    .append(details.triggerTime)
                     .append('|')
                     .append(details.description)
                     .append('|')
@@ -1099,11 +1157,12 @@ public class AgendaUpdateService extends Service {
             updateInProgress = true;
         }
 
-        List<Long> previousNotifications = currentNotifications;
-        Map<Long, NotificationDetails> previousNotificationDetails = currentNotificationDetails;
-        Map<Long, NotificationDetails> newNotificationDetails = new HashMap<>();
-        List<Long> activeNotificationEvents = getActiveNotificationEventIds(context);
+        List<String> previousNotifications = currentNotifications;
+        Map<String, NotificationDetails> previousNotificationDetails = currentNotificationDetails;
+        Map<String, NotificationDetails> newNotificationDetails = new HashMap<>();
+        List<String> activeNotificationKeys = getActiveNotificationKeys(context);
         List<NotificationDetails> triggeredReminderDetails = new ArrayList<>();
+        List<PendingReminderNotification> pendingReminderNotifications = new ArrayList<>();
         removeStaleIndividualNotifications(context);
 
         // Create or update only the notifications whose content actually changed.
@@ -1116,35 +1175,56 @@ public class AgendaUpdateService extends Service {
                     SpannableString spanDate = formatDate(context, calendarEvent, false); //new SpannableString(sb.toString());
                     SpannableString spanTitle = formatTitle(context, calendarEvent); //new SpannableString(calendarEvent.getTitle());
                     long eventId = calendarEvent.getId();
-                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime());
-                    NotificationDetails previousDetails = previousNotificationDetails.get(eventId);
+                    long triggerTime = calendarEvent.getTrigger() == null ? calendarEvent.getStartDate().getTime() : calendarEvent.getTrigger().getTime();
+                    NotificationDetails details = new NotificationDetails(spanTitle.toString(), spanDate.toString(), calendarEvent.getStartDate().getTime(), triggerTime);
+                    String notificationKey = eventNotificationKey(eventId, details.startTime);
+                    NotificationDetails previousDetails = previousNotificationDetails.get(notificationKey);
                     triggeredReminderDetails.add(details);
-                    if (newNotifications.size() < MAX_INDIVIDUAL_REMINDER_NOTIFICATIONS) {
-                        boolean isCached = previousNotifications.contains(eventId);
-                        boolean isActive = activeNotificationEvents == null || activeNotificationEvents.contains(eventId);
-                        if (!isCached || !isActive || !details.matches(previousDetails)) {
-                            createNotification(context, eventId, details.title, details.description, details.startTime);
-                            changed = true;
-                        }
-                        newNotifications.add(eventId);
-                        newNotificationDetails.put(eventId, details);
-                    }
+                    boolean isCached = previousNotifications.contains(notificationKey);
+                    boolean isActive = activeNotificationKeys == null || activeNotificationKeys.contains(notificationKey);
+                    boolean needsUpdate = !isCached || !isActive || !details.matches(previousDetails);
+                    pendingReminderNotifications.add(new PendingReminderNotification(eventId, notificationKey, details, needsUpdate));
+                    newNotifications.add(notificationKey);
+                    newNotificationDetails.put(notificationKey, details);
                 }
             }
         }
 
+        java.util.Collections.sort(pendingReminderNotifications, new java.util.Comparator<PendingReminderNotification>() {
+            @Override
+            public int compare(PendingReminderNotification first, PendingReminderNotification second) {
+                if (first.details.triggerTime < second.details.triggerTime) return 1;
+                if (first.details.triggerTime > second.details.triggerTime) return -1;
+                return first.details.title.compareTo(second.details.title);
+            }
+        });
+
+        long notificationOrderBase = System.currentTimeMillis();
+        for (int index = 0; index < pendingReminderNotifications.size(); index++) {
+            PendingReminderNotification pendingNotification = pendingReminderNotifications.get(index);
+            if (pendingNotification.needsUpdate) {
+                long notificationWhen = notificationOrderBase - index;
+                createNotification(context, pendingNotification.eventId, pendingNotification.notificationKey,
+                        pendingNotification.details.title, pendingNotification.details.description, notificationWhen);
+                changed = true;
+            }
+        }
+
+        removeStaleTaggedNotifications(context, newNotifications);
+
         // See if we have any new notifications
-        for(Long eventId : newNotifications) {
-            if (!previousNotifications.contains(eventId)) {
+        for(String notificationKey : newNotifications) {
+            if (!previousNotifications.contains(notificationKey)) {
                 changed=true;
                 break;
             }
         }
 
         // Remove all leftover notifications
-        for(Long eventId : previousNotifications) {
-            if (!newNotifications.contains(eventId)) {
-                removeNotification(context,eventId.longValue());
+        for(String notificationKey : previousNotifications) {
+            if (!newNotifications.contains(notificationKey)) {
+                NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
+                notificationManager.cancel(eventNotificationTag(notificationKey), EVENT_NOTIFICATION_ID);
                 changed=true;
             }
         }
@@ -1249,27 +1329,25 @@ public class AgendaUpdateService extends Service {
     }
 
     void removeNotification(Context ctx,long eventId) {
-        int id = -1;
-        synchronized(notifiedEventIDs) {
-            for (int i = 0; i < notifiedEventIDs.size(); i++) {
-                if (notifiedEventIDs.get(i)!=null && notifiedEventIDs.get(i) == eventId) {
-                    id=i;
-                    break;
+        NotificationManager notificationManager = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            Log.w("MYCALENDAR", "Cannot remove notification: NotificationManager is null");
+            return;
+        }
+
+        try {
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
+
+                Long activeEventId = eventIdFromNotificationTag(activeNotification.getTag());
+                if (activeEventId != null && activeEventId == eventId) {
+                    notificationManager.cancel(activeNotification.getTag(), activeNotification.getId());
                 }
             }
-        }
-        if (id!=-1) {
-            removeNotificationId(id);
-            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(ctx);
-            notificationManager.cancel(id);
-        }
-    }
-
-    void removeNotificationId(int id) {
-        synchronized(notifiedEventIDs) {
-            if (id < notifiedEventIDs.size()) {
-                notifiedEventIDs.set(id, null);
-            }
+        } catch (RuntimeException e) {
+            Log.w("MYCALENDAR", "Cannot remove notification for event " + eventId, e);
         }
     }
 

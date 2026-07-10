@@ -803,7 +803,6 @@ public class MainActivity extends AppCompatActivity {
     ServiceConnection mConnection = new ServiceConnection() {
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            Toast.makeText(MainActivity.this, "Service is disconnected", Toast.LENGTH_LONG).show();
             Log.v("MYCALENDAR","Service is disconnected");
             mBounded = false;
             mServer = null;
@@ -811,7 +810,6 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            Toast.makeText(MainActivity.this, "Service is connected", Toast.LENGTH_LONG).show();
             Log.v("MYCALENDAR","Service is connected");
             mBounded = true;
             AgendaUpdateService.LocalBinder mLocalBinder = (AgendaUpdateService.LocalBinder)service;

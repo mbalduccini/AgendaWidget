@@ -606,7 +606,7 @@ public class AgendaUpdateService extends Service {
         // TODO: check if using this thread really helps with Application-Not-Responding (ANR) errors
         Thread mainThread = new Thread() {
             public void run() {
-                observer = new AgendaUpdateService.CalendarObserver("", new Handler());
+                observer = new AgendaUpdateService.CalendarObserver("", new Handler(getMainLooper()));
                 intentFilter = new IntentFilter();
                 intentFilter.addAction(Intent.ACTION_TIME_TICK);
                 intentFilter.addAction(Intent.ACTION_TIMEZONE_CHANGED);
@@ -678,7 +678,7 @@ public class AgendaUpdateService extends Service {
                 }, (60L * 1000L), (60L * 1000L)); // every 1 min
             }
         };
-        mainThread.run();
+        mainThread.start();
     }
 
     // TODO remove
@@ -1289,6 +1289,10 @@ public class AgendaUpdateService extends Service {
 
 
     public void updateNotifications(Context context) {
+        updateNotifications(context, true);
+    }
+
+    private void updateNotifications(Context context, boolean sendChangedBroadcast) {
         boolean changed=false;
 
         synchronized(mainSyncObject) {
@@ -1418,7 +1422,7 @@ public class AgendaUpdateService extends Service {
             updateInProgress = false;
         }
 
-        if (changed)
+        if (changed && sendChangedBroadcast)
             sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
     }
 
@@ -1450,7 +1454,8 @@ public class AgendaUpdateService extends Service {
             updateInProgress = false;
         }
 
-        updateNotifications(context);
+        sendBroadcastMessage(EVENTS_UPDATED_BROADCAST);
+        updateNotifications(context, false);
     }
 
     public synchronized void updateTaskObservers() {
@@ -1472,7 +1477,7 @@ public class AgendaUpdateService extends Service {
         taskObservers = new AgendaWidget.TaskObserver[taskProviderURIs.size()];
         int i = 0;
         for (String uri : taskProviderURIs) {
-            taskObservers[i] = new AgendaWidget.TaskObserver(new Handler(), uri);
+            taskObservers[i] = new AgendaWidget.TaskObserver(new Handler(getMainLooper()), uri);
             i++;
         }
     }

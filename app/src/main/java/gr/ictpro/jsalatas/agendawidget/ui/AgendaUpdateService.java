@@ -1076,7 +1076,6 @@ public class AgendaUpdateService extends Service {
                         .setSmallIcon(R.drawable.ic_notes)
                         .setPriority(NotificationCompat.PRIORITY_MAX)//PRIORITY_DEFAULT)
                         .setContentIntent(tapIntent)
-                        .setAutoCancel(true)
                         // Do not trigger an alert if the notification is already showing and is updated
                         .setOnlyAlertOnce(true)
                         // Group the notifications
@@ -1222,6 +1221,34 @@ public class AgendaUpdateService extends Service {
         return activeNotificationKeys;
     }
 
+    private List<String> getActiveSummaryKeys(Context context) {
+        List<String> activeSummaryKeys = new ArrayList<>();
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            Log.w("MYCALENDAR", "Cannot query active summary notifications: NotificationManager is null");
+            return null;
+        }
+
+        try {
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
+
+                if (activeNotification.getId() == SUMMARY_NOTIFICATION_ID
+                        && activeNotification.getTag() != null
+                        && activeNotification.getTag().startsWith(MY_NOTIFICATION_GROUP_ID)) {
+                    activeSummaryKeys.add(activeNotification.getTag());
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.w("MYCALENDAR", "Cannot query active summary notifications; falling back to cached summary state", e);
+            return null;
+        }
+
+        return activeSummaryKeys;
+    }
+
     private void removeStaleTaggedNotifications(Context context, List<String> activeNotificationKeys) {
         NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (notificationManager == null) {
@@ -1307,6 +1334,7 @@ public class AgendaUpdateService extends Service {
         Map<String, NotificationDetails> previousNotificationDetails = currentNotificationDetails;
         Map<String, NotificationDetails> newNotificationDetails = new HashMap<>();
         List<String> activeNotificationKeys = getActiveNotificationKeys(context);
+        List<String> activeSummaryKeys = getActiveSummaryKeys(context);
         List<NotificationDetails> triggeredReminderDetails = new ArrayList<>();
         Map<String, List<NotificationDetails>> triggeredReminderDetailsByGroup = new HashMap<>();
         List<PendingReminderNotification> pendingReminderNotifications = new ArrayList<>();
@@ -1390,7 +1418,8 @@ public class AgendaUpdateService extends Service {
             String newSummarySignature = buildSummarySignature(groupReminderDetails);
             newSummarySignatures.put(groupKey, newSummarySignature);
             String previousSummarySignature = currentSummarySignatures.get(groupKey);
-            if (!newSummarySignature.equals(previousSummarySignature)) {
+            boolean isSummaryActive = activeSummaryKeys == null || activeSummaryKeys.contains(groupKey);
+            if (!isSummaryActive || !newSummarySignature.equals(previousSummarySignature)) {
                 createSummaryNotification(context, NOTIFICATION_CHANNEL_ID, groupKey, groupReminderDetails, true);
                 changed = true;
             }

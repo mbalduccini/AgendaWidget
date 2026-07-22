@@ -12,3 +12,5 @@ gen/
 libs/
 /settings
 app/release/
+.sogo.curlrc
+.sogo.netrc

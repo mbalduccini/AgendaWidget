@@ -24,6 +24,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.provider.CalendarContract;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AlertDialog;
@@ -39,9 +40,15 @@ import android.view.WindowManager;
 import android.widget.NumberPicker;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -153,6 +160,8 @@ public class AgendaUpdateService extends Service {
     final static int MAX_STALE_NOTIFICATION_ID_TO_CLEAN = 32;
     final static long TRIGGERED_REMINDERS_CHILD_SORT_TIME = Long.MAX_VALUE;
     final static long MIN_NOTIFICATION_POST_INTERVAL_MS = 300;
+    final static long NOTIFICATION_DIAGNOSTIC_MAX_BYTES = 1024 * 1024;
+    final static long SWIPE_DISMISS_BATCH_WINDOW_MS = 750;
 
     public final static boolean NEW_INTENTS = true;// this CANNOT be false. To switch to false, find a way to re-enable the block under condition "!NEW_INTENTS" that is currently commented out
 
@@ -195,6 +204,12 @@ public class AgendaUpdateService extends Service {
     List<EventItem> events = new ArrayList<>();
     boolean legacyUntaggedNotificationsCleaned = false;
     long lastNotificationPostMs = 0;
+    private final Object swipeDismissDialogSyncObject = new Object();
+    private final List<ExtendedCalendarEvent> pendingSwipeDismissConfirmations = new ArrayList<>();
+    private final Handler swipeDismissBatchHandler = new Handler(Looper.getMainLooper());
+    private boolean swipeDismissDialogShowing = false;
+    private boolean swipeDismissBatchScheduled = false;
+    private long nextSwipeDismissBatchId = 1;
 
     public final static int appWidgetId = 1;
     public final static String EVENTS_UPDATED_BROADCAST = AgendaUpdateService.class.getName() + "EventsUpdated";
@@ -203,6 +218,7 @@ public class AgendaUpdateService extends Service {
     boolean updateInProgress = false;
 
     private Object mainSyncObject = new Object();
+    private final Object notificationDiagnosticLogSyncObject = new Object();
 
     boolean serviceRunning = false;
     private Timer notificationTimer;
@@ -339,7 +355,7 @@ public class AgendaUpdateService extends Service {
     }
 
     public void handleDismiss(Context context, ExtendedCalendarEvent event) {
-        Log.v("MYCALENDAR", "in handleDismiss(); id=" + event.getId());
+        Log.v("MYCALENDAR", "in handleDismiss(); " + describeEvent(event));
         ExtendedCalendars.dismissCalDAVEventReminders(event);
         // TODO just call updateNotifications() after the refresh instead of using removeNotification()
         removeNotification(context, event.getId());
@@ -438,9 +454,52 @@ public class AgendaUpdateService extends Service {
     }
 
     public void handleSwipeDismiss(Context context, ExtendedCalendarEvent event) {
+        appendNotificationDiagnostic(context, "handleSwipeDismiss(): deleteIntent received for " + describeEvent(event));
+        appendNotificationSnapshot(context, "handleSwipeDismiss()");
         if (!Settings.getBoolPref(AgendaWidgetApplication.getContext(), "confirmSwipeDismiss", appWidgetId)) {
+            appendNotificationDiagnostic(context, "handleSwipeDismiss(): confirmSwipeDismiss is disabled; dismissing immediately " + describeEvent(event));
             handleDismiss(context, event);
             return;
+        }
+
+        synchronized (swipeDismissDialogSyncObject) {
+            pendingSwipeDismissConfirmations.add(event);
+            appendNotificationDiagnostic(context, "handleSwipeDismiss(): queued swipe-dismiss confirmation; pendingBatchSize="
+                    + pendingSwipeDismissConfirmations.size()
+                    + "; dialogShowing=" + swipeDismissDialogShowing
+                    + "; batchScheduled=" + swipeDismissBatchScheduled
+                    + "; " + describeEvent(event));
+            if (swipeDismissDialogShowing || swipeDismissBatchScheduled) {
+                return;
+            }
+            swipeDismissBatchScheduled = true;
+        }
+        swipeDismissBatchHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                showSwipeDismissBatchDialog(AgendaUpdateService.this);
+            }
+        }, SWIPE_DISMISS_BATCH_WINDOW_MS);
+    }
+
+    private void showSwipeDismissBatchDialog(Context context) {
+        final List<ExtendedCalendarEvent> batch;
+        final long batchId;
+        synchronized (swipeDismissDialogSyncObject) {
+            swipeDismissBatchScheduled = false;
+            if (swipeDismissDialogShowing) {
+                return;
+            }
+            if (pendingSwipeDismissConfirmations.isEmpty()) {
+                return;
+            }
+            batch = new ArrayList<>(pendingSwipeDismissConfirmations);
+            pendingSwipeDismissConfirmations.clear();
+            swipeDismissDialogShowing = true;
+            batchId = nextSwipeDismissBatchId++;
+            appendNotificationDiagnostic(context, "showSwipeDismissBatchDialog(): showing confirmation; batchId="
+                    + batchId + "; batchSize=" + batch.size()
+                    + "; events=" + describeEvents(batch));
         }
 
         Intent closeIntent = new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
@@ -448,25 +507,66 @@ public class AgendaUpdateService extends Service {
 
         Context dialogContext = new ContextThemeWrapper(context, R.style.AlertDialogTheme);
         AlertDialog.Builder builder = new AlertDialog.Builder(dialogContext);
-        builder.setTitle(context.getString(R.string.confirm_dismiss_title));
-        builder.setMessage(context.getString(R.string.confirm_dismiss_message) + "\n\n" + event.getTitle());
+        if (batch.size() == 1) {
+            final ExtendedCalendarEvent event = batch.get(0);
+            builder.setTitle(context.getString(R.string.confirm_dismiss_title));
+            builder.setMessage(context.getString(R.string.confirm_dismiss_message) + "\n\n" + event.getTitle());
+        } else {
+            builder.setTitle(context.getString(R.string.confirm_dismiss_multiple_title, batch.size()));
+            builder.setMessage(swipeDismissBatchMessage(context, batch));
+        }
         builder.setNegativeButton(context.getString(R.string.cancel), new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
+                appendNotificationDiagnostic(AgendaUpdateService.this, "showSwipeDismissBatchDialog(): user canceled swipe-dismiss confirmation; batchId="
+                        + batchId + "; batchSize=" + batch.size()
+                        + "; events=" + describeEvents(batch));
                 refreshList(AgendaUpdateService.this);
             }
         });
-        builder.setPositiveButton(context.getString(R.string.dismiss), new DialogInterface.OnClickListener() {
+        int positiveButtonText = batch.size() == 1 ? R.string.dismiss : R.string.dismiss_all;
+        builder.setPositiveButton(context.getString(positiveButtonText), new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                handleDismiss(AgendaUpdateService.this, event);
+                appendNotificationDiagnostic(AgendaUpdateService.this, "showSwipeDismissBatchDialog(): user confirmed swipe-dismiss; batchId="
+                        + batchId + "; batchSize=" + batch.size()
+                        + "; events=" + describeEvents(batch));
+                for (ExtendedCalendarEvent event : batch) {
+                    handleDismiss(AgendaUpdateService.this, event);
+                }
             }
         });
         final AlertDialog alertDialog = builder.create();
         alertDialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
             @Override
             public void onCancel(DialogInterface dialog) {
+                appendNotificationDiagnostic(AgendaUpdateService.this, "showSwipeDismissBatchDialog(): confirmation dialog canceled; batchId="
+                        + batchId + "; batchSize=" + batch.size()
+                        + "; events=" + describeEvents(batch));
                 refreshList(AgendaUpdateService.this);
+            }
+        });
+        alertDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface dialog) {
+                boolean shouldScheduleNextBatch = false;
+                synchronized (swipeDismissDialogSyncObject) {
+                    swipeDismissDialogShowing = false;
+                    appendNotificationDiagnostic(AgendaUpdateService.this, "showSwipeDismissBatchDialog(): dialog dismissed; batchId="
+                            + batchId + "; pendingBatchSize=" + pendingSwipeDismissConfirmations.size());
+                    if (!pendingSwipeDismissConfirmations.isEmpty() && !swipeDismissBatchScheduled) {
+                        swipeDismissBatchScheduled = true;
+                        shouldScheduleNextBatch = true;
+                    }
+                }
+                if (shouldScheduleNextBatch) {
+                    swipeDismissBatchHandler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            showSwipeDismissBatchDialog(AgendaUpdateService.this);
+                        }
+                    }, SWIPE_DISMISS_BATCH_WINDOW_MS);
+                }
             }
         });
         if (!(dialogContext instanceof Activity)) {
@@ -518,8 +618,11 @@ public class AgendaUpdateService extends Service {
     // TODO make this private again. To do that, I need to expose handleSnooze() so that MainActivity can get to it
     public final BroadcastReceiver br2 = new
             BroadcastReceiver() {
-                ExtendedCalendarEvent eventFromIntent(Intent intent) {
+                ExtendedCalendarEvent eventFromIntent(Context context, Intent intent) {
                     int id = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1);
+                    appendNotificationDiagnostic(context, "br2: received action=" + intent.getAction()
+                            + "; notificationRequestId=" + id
+                            + "; rawIntent=" + intent);
                     if (id == -1) return (null);
                     Log.v("MYCALENDAR", "br2: got dismiss for id=" + id);
                     long eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1);
@@ -535,7 +638,9 @@ public class AgendaUpdateService extends Service {
                     }
                     if (event == null) {
                         // TODO: this should never happen
-                        Log.e("MYCALENDAR", "br2: operation clicked for event with id=" + eventId + ", but no such id was found in events. Ignoring");
+                        appendNotificationDiagnostic(context, "br2: operation clicked for event with id=" + eventId + ", but no such id was found in events. Ignoring");
+                    } else {
+                        appendNotificationDiagnostic(context, "br2: resolved action=" + intent.getAction() + " to " + describeEvent(event));
                     }
                     return (event);
                 }
@@ -544,13 +649,14 @@ public class AgendaUpdateService extends Service {
                 public void onReceive(Context context, Intent intent) {
                     if (intent.getAction().equals(ACTION_DISMISS)) {
                         Log.v("MYCALENDAR", "received dismiss event");
-                        ExtendedCalendarEvent event = eventFromIntent(intent);
+                        ExtendedCalendarEvent event = eventFromIntent(context, intent);
                         if (event != null) {
                             handleDismiss(context, event);
                         }
                     } else if (intent.getAction().equals(ACTION_SWIPE_DISMISS)) {
-                        Log.v("MYCALENDAR", "received swipe dismiss event");
-                        ExtendedCalendarEvent event = eventFromIntent(intent);
+                        appendNotificationDiagnostic(context, "received swipe dismiss event; intent=" + intent);
+                        appendNotificationSnapshot(context, "br2 ACTION_SWIPE_DISMISS before event lookup");
+                        ExtendedCalendarEvent event = eventFromIntent(context, intent);
                         if (event != null) {
                             handleSwipeDismiss(context, event);
                         }
@@ -566,7 +672,7 @@ public class AgendaUpdateService extends Service {
                             Toast.makeText(context, log, Toast.LENGTH_LONG).show();
                         }
 
-                        ExtendedCalendarEvent event = eventFromIntent(intent);
+                        ExtendedCalendarEvent event = eventFromIntent(context, intent);
                         if (event != null) {
                             handleSnooze(context, event);
                         }
@@ -760,6 +866,11 @@ public class AgendaUpdateService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.v("MYCALENDAR","Service started");
+        appendNotificationDiagnostic(this, "AgendaUpdateService.onStartCommand(): notification diagnostics path="
+                + notificationDiagnosticLogFile(this).getAbsolutePath()
+                + "; intent=" + intent
+                + "; flags=" + flags
+                + "; startId=" + startId);
         boolean wasRunning = serviceRunning;
         serviceRunning=true;
 
@@ -863,6 +974,149 @@ public class AgendaUpdateService extends Service {
             return details.description;
         }
         return details.description + "\n" + details.location;
+    }
+
+    String describeEvent(ExtendedCalendarEvent event) {
+        if (event == null) {
+            return "event=null";
+        }
+        return "eventId=" + event.getId()
+                + "; title=\"" + event.getTitle() + "\""
+                + "; calendarId=" + event.getCalendarId()
+                + "; start=" + event.getStartDate()
+                + "; trigger=" + event.getTrigger();
+    }
+
+    String describeEvents(List<ExtendedCalendarEvent> events) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("[");
+        for (int i = 0; i < events.size(); i++) {
+            if (i > 0) {
+                builder.append("; ");
+            }
+            builder.append(describeEvent(events.get(i)));
+        }
+        builder.append("]");
+        return builder.toString();
+    }
+
+    String swipeDismissBatchMessage(Context context, List<ExtendedCalendarEvent> events) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(context.getString(R.string.confirm_dismiss_multiple_message, events.size()));
+        builder.append("\n\n");
+
+        int maxDisplayedEvents = 8;
+        int displayedEvents = Math.min(events.size(), maxDisplayedEvents);
+        for (int i = 0; i < displayedEvents; i++) {
+            builder.append("- ");
+            builder.append(events.get(i).getTitle());
+            if (i < displayedEvents - 1) {
+                builder.append("\n");
+            }
+        }
+        if (events.size() > displayedEvents) {
+            builder.append("\n");
+            builder.append(context.getString(R.string.confirm_dismiss_more, events.size() - displayedEvents));
+        }
+        return builder.toString();
+    }
+
+    String describeNotification(StatusBarNotification notification) {
+        if (notification == null) {
+            return "notification=null";
+        }
+        CharSequence title = notification.getNotification().extras == null
+                ? null
+                : notification.getNotification().extras.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence text = notification.getNotification().extras == null
+                ? null
+                : notification.getNotification().extras.getCharSequence(Notification.EXTRA_TEXT);
+        return "pkg=" + notification.getPackageName()
+                + "; id=" + notification.getId()
+                + "; tag=" + notification.getTag()
+                + "; key=" + notification.getKey()
+                + "; title=\"" + title + "\""
+                + "; text=\"" + text + "\"";
+    }
+
+    private File notificationDiagnosticLogFile(Context context) {
+        File baseDir = null;
+        File[] mediaDirs = context.getExternalMediaDirs();
+        if (mediaDirs != null && mediaDirs.length > 0 && mediaDirs[0] != null) {
+            baseDir = mediaDirs[0];
+        }
+        if (baseDir == null) {
+            baseDir = context.getExternalFilesDir(null);
+        }
+        if (baseDir == null) {
+            baseDir = context.getFilesDir();
+        }
+        return new File(baseDir, "notification-diagnostics.log");
+    }
+
+    private void appendNotificationDiagnostic(Context context, String message) {
+        Log.w("MYCALENDAR", message);
+        synchronized (notificationDiagnosticLogSyncObject) {
+            File logFile = notificationDiagnosticLogFile(context);
+            File parent = logFile.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                Log.w("MYCALENDAR", "Cannot create notification diagnostic log directory: " + parent);
+                return;
+            }
+
+            if (logFile.exists() && logFile.length() > NOTIFICATION_DIAGNOSTIC_MAX_BYTES) {
+                File oldLogFile = new File(parent, "notification-diagnostics.previous.log");
+                if (oldLogFile.exists() && !oldLogFile.delete()) {
+                    Log.w("MYCALENDAR", "Cannot delete old notification diagnostic log: " + oldLogFile);
+                }
+                if (!logFile.renameTo(oldLogFile)) {
+                    Log.w("MYCALENDAR", "Cannot rotate notification diagnostic log: " + logFile);
+                }
+            }
+
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS Z", Locale.US);
+            FileWriter writer = null;
+            try {
+                writer = new FileWriter(logFile, true);
+                writer.write(dateFormat.format(new Date()));
+                writer.write(" ");
+                writer.write(message);
+                writer.write("\n");
+            } catch (IOException e) {
+                Log.w("MYCALENDAR", "Cannot write notification diagnostic log: " + logFile, e);
+            } finally {
+                if (writer != null) {
+                    try {
+                        writer.close();
+                    } catch (IOException e) {
+                        Log.w("MYCALENDAR", "Cannot close notification diagnostic log: " + logFile, e);
+                    }
+                }
+            }
+        }
+    }
+
+    private void appendNotificationSnapshot(Context context, String reason) {
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager == null) {
+            appendNotificationDiagnostic(context, reason + ": cannot snapshot active notifications; NotificationManager is null");
+            return;
+        }
+
+        try {
+            StringBuilder builder = new StringBuilder();
+            builder.append(reason).append(": active notification snapshot begin");
+            for (StatusBarNotification activeNotification : notificationManager.getActiveNotifications()) {
+                if (!BuildConfig.APPLICATION_ID.equals(activeNotification.getPackageName())) {
+                    continue;
+                }
+                builder.append("\n  ").append(describeNotification(activeNotification));
+            }
+            builder.append("\n").append(reason).append(": active notification snapshot end");
+            appendNotificationDiagnostic(context, builder.toString());
+        } catch (RuntimeException e) {
+            appendNotificationDiagnostic(context, reason + ": cannot snapshot active notifications: " + e);
+        }
     }
 
     boolean isWebUrl(String value) {
@@ -1032,6 +1286,8 @@ public class AgendaUpdateService extends Service {
     public void updateTriggeredRemindersChildNotification(Context appContext, List<NotificationDetails> reminderDetails) {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
         int reminderCount = reminderDetails == null ? 0 : reminderDetails.size();
+        appendNotificationDiagnostic(appContext, "updateTriggeredRemindersChildNotification(): canceling child notification id="
+                + TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID + "; reminderCount=" + reminderCount);
         notificationManager.cancel(TRIGGERED_REMINDERS_CHILD_NOTIFICATION_ID);
     }
 
@@ -1093,7 +1349,10 @@ public class AgendaUpdateService extends Service {
         Notification summaryNotification = builder.build();
         if (doDisplayNotification) {
             NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
+            appendNotificationDiagnostic(appContext, "createSummaryNotification(): canceling legacy summary id=" + LEGACY_SUMMARY_NOTIFICATION_ID);
             notificationManager.cancel(LEGACY_SUMMARY_NOTIFICATION_ID);
+            appendNotificationDiagnostic(appContext, "createSummaryNotification(): canceling legacy tagged summary tag="
+                    + LEGACY_NOTIFICATION_GROUP_ID + "; id=" + SUMMARY_NOTIFICATION_ID);
             notificationManager.cancel(LEGACY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
             throttleNotificationPost();
             notificationManager.notify(groupKey, SUMMARY_NOTIFICATION_ID, summaryNotification);
@@ -1156,10 +1415,16 @@ public class AgendaUpdateService extends Service {
     public void removeSummaryNotification(Context appContext) {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(appContext);
         for (String groupKey : currentSummarySignatures.keySet()) {
+            appendNotificationDiagnostic(appContext, "removeSummaryNotification(): canceling current summary tag="
+                    + groupKey + "; id=" + SUMMARY_NOTIFICATION_ID);
             notificationManager.cancel(groupKey, SUMMARY_NOTIFICATION_ID);
         }
+        appendNotificationDiagnostic(appContext, "removeSummaryNotification(): canceling untagged summary id=" + SUMMARY_NOTIFICATION_ID);
         notificationManager.cancel(MY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
+        appendNotificationDiagnostic(appContext, "removeSummaryNotification(): canceling legacy untagged summary id=" + LEGACY_SUMMARY_NOTIFICATION_ID);
         notificationManager.cancel(LEGACY_SUMMARY_NOTIFICATION_ID);
+        appendNotificationDiagnostic(appContext, "removeSummaryNotification(): canceling legacy tagged summary tag="
+                + LEGACY_NOTIFICATION_GROUP_ID + "; id=" + SUMMARY_NOTIFICATION_ID);
         notificationManager.cancel(LEGACY_NOTIFICATION_GROUP_ID, SUMMARY_NOTIFICATION_ID);
     }
 
@@ -1185,6 +1450,8 @@ public class AgendaUpdateService extends Service {
 
                 int notificationId = activeNotification.getId();
                 if (notificationId >= FIRST_EVENT_NOTIFICATION_ID && notificationId <= MAX_STALE_NOTIFICATION_ID_TO_CLEAN) {
+                    appendNotificationDiagnostic(context, "removeStaleIndividualNotifications(): canceling legacy untagged notification; "
+                            + describeNotification(activeNotification));
                     notificationManager.cancel(notificationId);
                 }
             }
@@ -1264,6 +1531,8 @@ public class AgendaUpdateService extends Service {
 
                 String notificationKey = notificationKeyFromTag(activeNotification.getTag());
                 if (notificationKey != null && !activeNotificationKeys.contains(notificationKey)) {
+                    appendNotificationDiagnostic(context, "removeStaleTaggedNotifications(): canceling stale event notification; notificationKey="
+                            + notificationKey + "; " + describeNotification(activeNotification));
                     notificationManager.cancel(activeNotification.getTag(), activeNotification.getId());
                 }
             }
@@ -1288,6 +1557,8 @@ public class AgendaUpdateService extends Service {
                 String tag = activeNotification.getTag();
                 if (tag != null && tag.startsWith(MY_NOTIFICATION_GROUP_ID)
                         && !activeSummarySignatures.containsKey(tag)) {
+                    appendNotificationDiagnostic(context, "removeStaleSummaryNotifications(): canceling stale summary notification; "
+                            + describeNotification(activeNotification));
                     notificationManager.cancel(tag, activeNotification.getId());
                 }
             }
@@ -1406,6 +1677,9 @@ public class AgendaUpdateService extends Service {
         for(String notificationKey : previousNotifications) {
             if (!newNotifications.contains(notificationKey)) {
                 NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
+                appendNotificationDiagnostic(context, "updateNotifications(): canceling leftover event notification; notificationKey="
+                        + notificationKey + "; tag=" + eventNotificationTag(notificationKey)
+                        + "; id=" + EVENT_NOTIFICATION_ID);
                 notificationManager.cancel(eventNotificationTag(notificationKey), EVENT_NOTIFICATION_ID);
                 changed=true;
             }
@@ -1427,6 +1701,8 @@ public class AgendaUpdateService extends Service {
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
         for (String groupKey : currentSummarySignatures.keySet()) {
             if (!newSummarySignatures.containsKey(groupKey)) {
+                appendNotificationDiagnostic(context, "updateNotifications(): canceling leftover summary notification; tag="
+                        + groupKey + "; id=" + SUMMARY_NOTIFICATION_ID);
                 notificationManager.cancel(groupKey, SUMMARY_NOTIFICATION_ID);
                 changed = true;
             }
@@ -1541,6 +1817,8 @@ public class AgendaUpdateService extends Service {
 
                 Long activeEventId = eventIdFromNotificationTag(activeNotification.getTag());
                 if (activeEventId != null && activeEventId == eventId) {
+                    appendNotificationDiagnostic(ctx, "removeNotification(): canceling notification for eventId="
+                            + eventId + "; " + describeNotification(activeNotification));
                     notificationManager.cancel(activeNotification.getTag(), activeNotification.getId());
                 }
             }

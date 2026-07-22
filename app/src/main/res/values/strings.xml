@@ -144,6 +144,10 @@
     <string name="separate_reminders_by_calendar_desc">Group reminder notifications separately for each calendar.</string>
     <string name="confirm_dismiss_title">Dismiss reminder?</string>
     <string name="confirm_dismiss_message">Dismiss this reminder?</string>
+    <string name="confirm_dismiss_multiple_title">Dismiss %1$d reminders?</string>
+    <string name="confirm_dismiss_multiple_message">Dismiss these %1$d reminders?</string>
+    <string name="confirm_dismiss_more">+ %1$d more</string>
+    <string name="dismiss_all">Dismiss All</string>
     <string name="cancel">Cancel</string>
 
 </resources>
